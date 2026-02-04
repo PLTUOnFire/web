@@ -1,0 +1,58 @@
+.logs-panel {
+  margin-top: 30px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 20px;
+  max-height: 300px;
+  overflow-y: auto;
+  animation: fadeInScale 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.5s backwards;
+}
+
+.logs-header {
+  font-family: 'Orbitron', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 15px;
+  color: var(--text-mid);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.log-container {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.log-entry {
+  padding: 8px 12px;
+  background: var(--bg-deep);
+  border-left: 2px solid var(--border-subtle);
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.8rem;
+  color: var(--text-mid);
+  animation: slideInLeft 0.3s ease;
+}
+
+.log-entry.info {
+  border-left-color: var(--accent-info);
+}
+
+.log-entry.success {
+  border-left-color: var(--accent-primary);
+}
+
+.log-entry.warning {
+  border-left-color: var(--accent-warning);
+}
+
+.log-entry.error {
+  border-left-color: var(--accent-danger);
+}
+
+.log-timestamp {
+  color: var(--text-dim);
+  margin-right: 10px;
+}
