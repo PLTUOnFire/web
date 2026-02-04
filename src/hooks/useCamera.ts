@@ -20,11 +20,11 @@ interface CameraDevice {
 }
 
 interface CameraRefs {
-  [key: string]: React.RefObject<HTMLVideoElement>
+  [key: string]: React.RefObject<HTMLVideoElement | null>
 }
 
 interface CanvasRefs {
-  [key: string]: React.RefObject<HTMLCanvasElement>
+  [key: string]: React.RefObject<HTMLCanvasElement | null>
 }
 
 interface StreamsRef {
@@ -45,15 +45,15 @@ export function useCamera() {
   const [availableDevices, setAvailableDevices] = useState<CameraDevice[]>([])
 
   const videoRefs: CameraRefs = {
-    cam1: useRef(null),
-    cam2: useRef(null),
-    cam3: useRef(null)
+    cam1: useRef<HTMLVideoElement>(null),
+    cam2: useRef<HTMLVideoElement>(null),
+    cam3: useRef<HTMLVideoElement>(null)
   }
 
   const canvasRefs: CanvasRefs = {
-    cam1: useRef(null),
-    cam2: useRef(null),
-    cam3: useRef(null)
+    cam1: useRef<HTMLCanvasElement>(null),
+    cam2: useRef<HTMLCanvasElement>(null),
+    cam3: useRef<HTMLCanvasElement>(null)
   }
 
   const streamsRef = useRef<StreamsRef>({})
@@ -69,6 +69,19 @@ export function useCamera() {
   // Enumerate available camera devices
   const getAvailableDevices = useCallback(async () => {
     try {
+      // Request permission first to get proper device labels
+      // This is needed because device.label is empty until permission is granted
+      try {
+        const permissionStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1920 }, height: { ideal: 1080 } }
+        })
+        // Stop immediately after getting permission - we just need the labels
+        permissionStream.getTracks().forEach(track => track.stop())
+        console.log('Camera permission granted, enumerating devices with proper labels...')
+      } catch (permError) {
+        console.warn('Could not auto-request camera permission, continuing with enumeration...', permError)
+      }
+
       const devices = await navigator.mediaDevices.enumerateDevices()
       const videoDevices = devices
         .filter(d => d.kind === 'videoinput')
@@ -266,7 +279,7 @@ export function useCamera() {
       }
       
       // Add timeout for getUserMedia with better error handling
-      let timeoutId: NodeJS.Timeout
+      let timeoutId: ReturnType<typeof setTimeout>
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
           reject(new Error('getUserMedia timeout after 10 seconds'))
@@ -402,7 +415,8 @@ export function useCamera() {
         const camId = `cam${i + 1}`
         const selectedDeviceId = cameras[camId as 'cam1' | 'cam2' | 'cam3']?.selectedDeviceId
         
-        // Use selected device if available, otherwise use smart default assignment
+        // Use selected device if available, otherwise use ONLY the first device
+        // This avoids issues with virtual cameras (OBS, Iriun, NVIDIA Broadcast) that may not be running
         let deviceToUse: string
         
         if (selectedDeviceId) {
@@ -410,18 +424,9 @@ export function useCamera() {
           deviceToUse = selectedDeviceId
           console.log(`[${camId}] Using pre-selected device: ${selectedDeviceId}`)
         } else {
-          // Smart assignment: cam1=first, cam2=secondLast, cam3=last
-          let deviceIndex: number
-          if (i === 0) {
-            deviceIndex = 0 // cam1 gets first device
-          } else if (i === 1) {
-            deviceIndex = Math.max(0, videoDevices.length - 2) // cam2 gets second-to-last
-          } else {
-            deviceIndex = videoDevices.length - 1 // cam3 gets last device
-          }
-          
-          deviceToUse = videoDevices[deviceIndex].deviceId
-          console.log(`[${camId}] Using default assignment at index ${deviceIndex}: ${deviceToUse}`)
+          // Default: all cameras use the first available device (real camera, not virtual)
+          deviceToUse = videoDevices[0].deviceId
+          console.log(`[${camId}] Using default device (index 0): ${videoDevices[0].label}`)
         }
         
         camerasToStart.push({ camId, deviceId: deviceToUse })
@@ -435,7 +440,7 @@ export function useCamera() {
         console.log(`Starting ${camId} (${i + 1}/${camerasToStart.length})...`)
         
         // Start this camera
-        const success = await startCamera(camId, deviceId)
+        await startCamera(camId, deviceId)
         
         // Add delay before next camera (except for last one)
         if (i < camerasToStart.length - 1) {

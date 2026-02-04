@@ -5,6 +5,7 @@ import ControlPanel from './components/ControlPanel'
 import LogsPanel from './components/LogsPanel'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useCamera } from './hooks/useCamera'
+import { useRecorder } from './hooks/useRecorder'
 import './App.css'
 
 interface Log {
@@ -32,10 +33,10 @@ interface MLResult {
 
 function App() {
   const [logs, setLogs] = useState<Log[]>([])
-  const [recording, setRecording] = useState(false)
   const logIdRef = useRef(0)
   const sessionIdRef = useRef(`${Date.now()}-${Math.random()}`)
   const initializedRef = useRef(false)
+  const lastMLResultRef = useRef<MLResult | null>(null)
 
   // Add log entry - MUST be defined before useWebSocket
   const addLog = (message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
@@ -59,8 +60,6 @@ function App() {
     isDeviceInUse,
     updateCameraMetrics,
     updateCameraFace,
-    updateCameraFPS,
-    setCameraActive,
     videoRefs,
     canvasRefs,
     streamsRef,
@@ -73,16 +72,27 @@ function App() {
     wsConnected,
     mlActive,
     connectWebSocket,
-    disconnectWebSocket,
     sendFrame
   } = useWebSocket({
     onMessage: handleMLResult,
     onLog: addLog
   })
 
+  const {
+    isRecording,
+    startRecording,
+    stopRecording,
+    sendFrame: sendRecorderFrame
+  } = useRecorder({
+    onLog: addLog
+  })
+
   // Handle ML results from WebSocket
   function handleMLResult(data: MLResult) {
     const camId = data.camera_id || 'cam1'
+    
+    // Store last ML result for recording
+    lastMLResultRef.current = data
     
     // Update face detection status
     if (data.face !== undefined) {
@@ -148,20 +158,29 @@ function App() {
     })
   }
 
-  // Auto-send frames to backend
+  // Auto-send frames to backend and recorder
   useEffect(() => {
-    if (!wsConnected) return
+    if (!wsConnected && !isRecording) return
     
     const interval = setInterval(() => {
       Object.keys(streamsRef.current).forEach(camId => {
-        if (streamsRef.current[camId]) {
-          sendFrame(camId, videoRefs[camId as 'cam1' | 'cam2' | 'cam3']?.current)
+        const videoRef = videoRefs[camId as 'cam1' | 'cam2' | 'cam3']?.current
+        if (streamsRef.current[camId] && videoRef) {
+          // Send to ML backend if connected
+          if (wsConnected) {
+            sendFrame(camId, videoRef)
+          }
+          
+          // Send to recorder if recording
+          if (isRecording) {
+            sendRecorderFrame(camId, videoRef, lastMLResultRef.current)
+          }
         }
       })
     }, 200)
     
     return () => clearInterval(interval)
-  }, [wsConnected, streamsRef, videoRefs, sendFrame])
+  }, [wsConnected, isRecording, streamsRef, videoRefs, sendFrame, sendRecorderFrame])
 
   // Handle start cameras
   const handleStartCameras = async () => {
@@ -185,12 +204,17 @@ function App() {
   }
 
   // Handle recording toggle
-  const handleToggleRecording = () => {
-    setRecording(!recording)
-    if (!recording) {
-      addLog('Recording started', 'success')
+  const handleToggleRecording = async () => {
+    if (!isRecording) {
+      const success = await startRecording()
+      if (!success) {
+        addLog('Failed to start recording', 'error')
+      }
     } else {
-      addLog('Recording stopped', 'info')
+      const success = await stopRecording()
+      if (!success) {
+        addLog('Failed to stop recording', 'error')
+      }
     }
   }
 
@@ -204,13 +228,18 @@ function App() {
       // Get and log available devices
       getAvailableDevices().then(devices => {
         if (devices.length > 0) {
-          addLog(`Found ${devices.length} camera devices. Showing in console.`, 'info')
+          addLog(`Found ${devices.length} camera device(s).`, 'info')
+          // Auto-select first device if only one is available
+          if (devices.length === 1) {
+            setSelectedDevice('cam1', devices[0].deviceId)
+            addLog(`Auto-selected device: ${devices[0].label}`, 'info')
+          }
         } else {
-          addLog('No camera devices found!', 'warning')
+          addLog('No camera devices found! Please check permissions and camera hardware.', 'warning')
         }
       })
     }
-  }, [])
+  }, [setSelectedDevice, addLog])
 
   const systemActive = Object.values(cameras).some(cam => cam.active)
 
@@ -244,7 +273,7 @@ function App() {
         
         <ControlPanel
           wsConnected={wsConnected}
-          recording={recording}
+          recording={isRecording}
           onStartCameras={handleStartCameras}
           onStopCameras={handleStopCameras}
           onConnectWS={handleConnectWS}

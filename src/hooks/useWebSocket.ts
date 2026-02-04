@@ -3,14 +3,14 @@ import config from '../config'
 
 interface UseWebSocketProps {
   onMessage?: (data: any) => void
-  onLog?: (message: string, type?: string) => void
+  onLog?: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void
 }
 
 export function useWebSocket({ onMessage, onLog }: UseWebSocketProps) {
   const [wsConnected, setWsConnected] = useState(false)
   const [mlActive, setMlActive] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectAttemptsRef = useRef(0)
 
   // Connect to WebSocket with auto-reconnect

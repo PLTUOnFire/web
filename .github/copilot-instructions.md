@@ -16,17 +16,24 @@
 ### Hook-Based Communication
 - **useWebSocket.ts**: Manages WebSocket connection to backend (config.wsUrl), auto-reconnects with exponential backoff (max 5 attempts), parses ML results
 - **useCamera.ts**: Manages MediaStream capture, canvas drawing, FPS calculation, device enumeration with AbortControllers for cleanup
-- **Data Flow**: useCamera captures frames → App draws to canvas → WebSocket sends canvas data → Backend returns ML results → App updates camera metrics
+- **useRecorder.ts**: Manages video recording sessions, batches frames for backend storage, includes ML metadata with frames
+- **Data Flow**: useCamera captures frames → App draws to canvas → [WebSocket sends to ML] + [HTTP sends to recorder] → Results update metrics
+
+### Recording System
+- **Flow**: `startRecording()` creates session → frames sent via POST multipart/form-data → `stopRecording()` finalizes videos
+- **Session Management**: Unique session ID generated per recording (`${Date.now()}-${randomString}`)
+- **Frame Throttling**: Frames batched at 250ms intervals (~4 FPS sent) but saved at 15 FPS by backend
+- **ML Integration**: Last ML result stored in ref, sent alongside frames to backend for metadata
 
 ## Key Conventions & Patterns
 
 ### Camera ID Management
-- Fixed camera IDs: `cam1`, `cam2`, `cam3` (defined in [src/utils/constants.ts](src/utils/constants.ts))
+- Fixed camera IDs: `cam1`, `cam2`, `cam3` (defined in `src/utils/constants.ts`)
 - Store camera state as `Record<string, Camera>` object for easy iteration and updates
 - Pass camera ID as `string` parameter to identify which camera in callbacks
 
 ### Environment Configuration
-All runtime config via environment variables in [src/config.ts](src/config.ts):
+All runtime config via environment variables in `src/config.ts`:
 - `VITE_WS_URL`: WebSocket backend URL (default: `ws://localhost:8000/ws`)
 - `VITE_API_URL`: REST API base URL (default: `http://localhost:8000`)
 - `VITE_CAMERA_WIDTH/HEIGHT`: Capture resolution (default: 1920x1080)
@@ -97,11 +104,87 @@ npm run deploy:netlify      # Deploy to Netlify (with --prod flag)
 - Throws on permissions denied; catch and log errors
 
 ### Canvas Drawing
-- Draw ML bounding boxes with colors from [src/utils/constants.ts#BOX_COLORS](src/utils/constants.ts)
+- Draw ML bounding boxes with colors from `src/utils/constants.ts` BOX_COLORS
 - Use `CANVAS_SETTINGS` for font/line width/text styling
 - Coordinates are normalized (0-1); convert to pixels with `toPixel()` helper
 
 ## Common Task Patterns
+
+## Recording System Implementation (v2.0 - Real-Time Streaming)
+
+### Problem Fixed
+**v1.0 issue**: Videos were 1 second long even with many frames
+- Buffered all frames in memory
+- Wrote to disk only at stop() time
+- Fixed 15 FPS regardless of actual frame rate
+- Result: Duration was wrong
+
+**v2.0 solution**: Real-time streaming writes frames immediately
+- No buffering - write as frames arrive
+- Accurate FPS and duration
+- WebSocket for efficient delivery
+- HTTP fallback if WebSocket unavailable
+
+### Key Files
+- `src/hooks/useRecorder.ts` - Frontend recording hook
+- `backend_streaming.py` - Backend streaming service
+- `test_backend.py` - Testing script
+- `SETUP_AND_TEST.md` - Full setup guide
+
+### Frontend Flow
+1. Call `startRecording(fps)` to initialize session
+2. Backend creates RecordingSession and CameraWriter (lazy init)
+3. Frames sent every 250ms (~4 FPS)
+4. For each frame:
+   - Send JSON: `{"type": "frame_info", "camera_id": "cam1", "ml_data": {...}}`
+   - Send binary: JPEG frame data
+5. Backend immediately writes to MP4 (real-time)
+6. Call `stopRecording()` to finalize videos
+
+### WebSocket Protocol
+```javascript
+// Initialize
+Client → Server: {"type": "init", "fps": 30}
+Server → Client: {"status": "ok", "message": "Initialized @ 30 FPS"}
+
+// For each frame
+Client → Server: {"type": "frame_info", "camera_id": "cam1", "ml_data": {...}}
+Client → Server: Binary JPEG data
+Server → Client: {"status": "ok", "message": "Frame recorded"}
+
+// Close
+Client closes connection
+Server finalizes and saves videos
+```
+
+### Backend Components
+- **CameraWriter**: Writes frames immediately to MP4, thread-safe
+- **RecordingSession**: Manages up to 3 CameraWriters (one per camera)
+- **WebSocket Handler**: Receives frame_info + binary, writes immediately
+
+### Configuration
+Backend defaults in `backend_streaming.py`:
+```python
+VIDEO_CODEC = "mp4v"        # MP4 codec
+DEFAULT_FPS = 30            # Default FPS
+FRAME_BUFFER_SIZE = 5       # Smoothness buffer
+```
+
+Frontend settings in `startRecording()`:
+```typescript
+const success = await startRecording(30)  // 30 FPS
+```
+
+### Video Output
+```
+recordings/{sessionId}/
+├── metadata.json
+├── cam1/
+│   ├── cam1_20260204_103015.mp4  (real-time written)
+│   └── ml_results.json
+├── cam2/ ...
+└── cam3/ ...
+```
 
 ### Adding a New Metric Type
 1. Add to `METRIC_TYPES` and `BOX_COLORS` in constants.ts
