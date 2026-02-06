@@ -41,11 +41,12 @@ interface GazeData {
 
 interface EyeTrackingHookProps {
   sessionId: string
+  cameraId: string
   onLog?: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void
   onGazeData?: (data: GazeData) => void
 }
 
-export function useEyeTracking({ sessionId, onLog, onGazeData }: EyeTrackingHookProps) {
+export function useEyeTracking({ sessionId, cameraId, onLog, onGazeData }: EyeTrackingHookProps) {
   const [isTracking, setIsTracking] = useState(false)
   const [latestGazeData, setLatestGazeData] = useState<GazeData | null>(null)
   const [alertLevel, setAlertLevel] = useState<'normal' | 'warning' | 'danger' | 'critical'>('normal')
@@ -55,7 +56,7 @@ export function useEyeTracking({ sessionId, onLog, onGazeData }: EyeTrackingHook
   const isConnectedRef = useRef(false)
 
   /**
-   * Connect WebSocket for eye tracking
+   * Connect WebSocket for eye tracking (per-camera)
    */
   const connectWebSocket = useCallback(() => {
     if (wsRef.current) return
@@ -66,7 +67,8 @@ export function useEyeTracking({ sessionId, onLog, onGazeData }: EyeTrackingHook
         baseUrl = baseUrl.slice(0, -3)
       }
       
-      const wsUrl = `${baseUrl}/ws/record/${sessionId}`
+      // Backend format: /ws/record/{camera_id}/{session_id}
+      const wsUrl = `${baseUrl}/ws/record/${cameraId}/${sessionId}`
       const ws = new WebSocket(wsUrl)
 
       ws.onopen = () => {
@@ -116,7 +118,7 @@ export function useEyeTracking({ sessionId, onLog, onGazeData }: EyeTrackingHook
       console.error('[EyeTracking] Connection failed:', error)
       onLog?.('Eye tracking: Failed to connect', 'error')
     }
-  }, [sessionId, onLog, onGazeData])
+  }, [sessionId, cameraId, onLog, onGazeData])
 
   /**
    * Disconnect WebSocket

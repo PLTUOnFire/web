@@ -8,99 +8,88 @@ interface StreamRecorderProps {
 interface CameraRecorder {
   mediaRecorder: MediaRecorder
   cameraId: string
+  sessionId: string
+  ws: WebSocket | null
+}
+
+interface RecordingSession {
+  sessionId: string
+  cameraId: string
+  operatorName: string
+  fps: number
 }
 
 export function useStreamRecorder({ onLog }: StreamRecorderProps) {
   const [isRecording, setIsRecording] = useState(false)
-  const sessionIdRef = useRef<string | null>(null)
+  const recordingSessions = useRef<Map<string, RecordingSession>>(new Map())
   const recordersRef = useRef<Map<string, CameraRecorder>>(new Map())
-  const wsRef = useRef<WebSocket | null>(null)
-  const isConnectedRef = useRef(false)
+  const wsConnectionsRef = useRef<Map<string, WebSocket>>(new Map())
 
   /**
-   * Check if WebSocket is connected
+   * Check if WebSocket is connected for specific camera
    */
-  const isWebSocketConnected = useCallback(() => {
-    return wsRef.current !== null && 
-           wsRef.current.readyState === WebSocket.OPEN &&
-           isConnectedRef.current
+  const isWebSocketConnected = useCallback((cameraId: string) => {
+    const ws = wsConnectionsRef.current.get(cameraId)
+    return ws !== null && 
+           ws !== undefined && 
+           ws.readyState === WebSocket.OPEN
   }, [])
 
   /**
-   * Safely send via WebSocket
+   * Cleanup WebSocket connection for specific camera
    */
-  const safeSend = useCallback((data: string | Blob) => {
-    if (!isWebSocketConnected()) {
-      return false
-    }
-
-    try {
-      wsRef.current?.send(data)
-      return true
-    } catch (error) {
-      console.error('[Recorder] Send error:', error)
-      isConnectedRef.current = false
-      return false
-    }
-  }, [isWebSocketConnected])
-
-  /**
-   * Cleanup WebSocket connection
-   */
-  const cleanupWebSocket = useCallback(() => {
-    if (wsRef.current) {
+  const cleanupWebSocket = useCallback((cameraId: string) => {
+    const ws = wsConnectionsRef.current.get(cameraId)
+    if (ws) {
       try {
-        if (isWebSocketConnected()) {
-          safeSend(JSON.stringify({ type: 'disconnect' }))
-        }
-        wsRef.current.close()
+        ws.close()
       } catch (error) {
         // Ignore
       } finally {
-        wsRef.current = null
-        isConnectedRef.current = false
+        wsConnectionsRef.current.delete(cameraId)
       }
     }
-  }, [isWebSocketConnected, safeSend])
+  }, [])
 
   /**
-   * Connect to WebSocket for recording
+   * Connect to WebSocket for specific camera recording
+   * Backend format: /ws/record/{camera_id}/{session_id}
    */
-  const connectWebSocket = useCallback((sessionId: string, fps: number = 60): Promise<WebSocket | null> => {
+  const connectWebSocket = useCallback((
+    cameraId: string,
+    sessionId: string,
+    fps: number = 60
+  ): Promise<WebSocket | null> => {
     return new Promise((resolve) => {
       try {
-        cleanupWebSocket()
+        cleanupWebSocket(cameraId)
 
         let baseUrl = config.wsUrl
         if (baseUrl.endsWith('/ws')) {
           baseUrl = baseUrl.slice(0, -3)
         }
         
-        const wsUrl = `${baseUrl}/ws/record/${sessionId}`
-        console.log(`[Recorder] Connecting to: ${wsUrl}`)
+        const wsUrl = `${baseUrl}/ws/record/${cameraId}/${sessionId}`
+        console.log(`[Recorder] ${cameraId}: Connecting to: ${wsUrl}`)
         
         const ws = new WebSocket(wsUrl)
 
         ws.onopen = () => {
-          console.log('[Recorder] WebSocket connected')
-          isConnectedRef.current = true
-          
-          // Send init with FPS
-          ws.send(JSON.stringify({ type: 'init', fps }))
-          
-          onLog?.(`Recording: WebSocket streaming at ${fps} FPS`, 'success')
+          console.log(`[Recorder] ${cameraId}: WebSocket connected`)
+          wsConnectionsRef.current.set(cameraId, ws)
+          onLog?.(`${cameraId}: WebSocket streaming at ${fps} FPS`, 'success')
           resolve(ws)
         }
 
         ws.onerror = (error) => {
-          console.error('[Recorder] WebSocket error:', error)
-          onLog?.('Recording: WebSocket error, will use HTTP fallback', 'warning')
+          console.error(`[Recorder] ${cameraId}: WebSocket error:`, error)
+          onLog?.(`${cameraId}: WebSocket error, will use HTTP fallback`, 'warning')
           resolve(null)
         }
 
         ws.onclose = () => {
-          console.log('[Recorder] WebSocket closed')
-          isConnectedRef.current = false
+          console.log(`[Recorder] ${cameraId}: WebSocket closed`)
+          wsConnectionsRef.current.delete(cameraId)
         }
 
         // Timeout fallback
@@ -112,62 +101,14 @@ export function useStreamRecorder({ onLog }: StreamRecorderProps) {
         }, 3000)
 
       } catch (error) {
-        console.error('[Recorder] Connection failed:', error)
+        console.error(`[Recorder] ${cameraId}: Connection failed:`, error)
         resolve(null)
       }
     })
   }, [cleanupWebSocket, onLog])
 
   /**
-   * Create MediaRecorder for camera stream with 60 FPS support
-   */
-  const createRecorder = useCallback((
-    cameraId: string,
-    stream: MediaStream,
-    fps: number = 60
-  ): MediaRecorder | null => {
-    try {
-      // Check supported MIME types with high bitrate for 60 FPS
-      const mimeTypes = [
-        'video/webm;codecs=vp9,opus',
-        'video/webm;codecs=vp8,opus',
-        'video/webm;codecs=vp9',
-        'video/webm;codecs=vp8',
-        'video/webm',
-      ]
-
-      let selectedMimeType = ''
-      for (const mimeType of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(mimeType)) {
-          selectedMimeType = mimeType
-          break
-        }
-      }
-
-      if (!selectedMimeType) {
-        console.error('[Recorder] No supported MIME type found')
-        return null
-      }
-
-      console.log(`[Recorder] ${cameraId}: Using ${selectedMimeType} @ ${fps} FPS`)
-
-      // Higher bitrate for 60 FPS 1080p (10 Mbps for quality)
-      const videoBitsPerSecond = fps >= 60 ? 10000000 : 5000000
-
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: selectedMimeType,
-        videoBitsPerSecond, // 10 Mbps for 60fps, 5 Mbps for 30fps
-      })
-
-      return mediaRecorder
-    } catch (error) {
-      console.error(`[Recorder] Failed to create MediaRecorder for ${cameraId}:`, error)
-      return null
-    }
-  }, [])
-
-  /**
-   * Setup MediaRecorder with WebSocket streaming
+   * Setup MediaRecorder with WebSocket streaming (per-camera)
    */
   const setupRecorderWebSocket = useCallback((
     mediaRecorder: MediaRecorder,
@@ -178,13 +119,13 @@ export function useStreamRecorder({ onLog }: StreamRecorderProps) {
       if (event.data && event.data.size > 0) {
         try {
           if (ws.readyState === WebSocket.OPEN) {
-            // Send camera selection
+            // Send frame_info JSON first, then binary data
             ws.send(JSON.stringify({
-              type: 'camera_select',
+              type: 'frame_info',
               camera_id: cameraId
             }))
             
-            // Send video chunk
+            // Send video chunk as binary
             ws.send(event.data)
           }
         } catch (error) {
@@ -198,7 +139,7 @@ export function useStreamRecorder({ onLog }: StreamRecorderProps) {
     }
 
     mediaRecorder.onstart = () => {
-      console.log(`[Recorder] ${cameraId}: Recording started`)
+      console.log(`[Recorder] ${cameraId}: Recording started @ ${mediaRecorder.mimeType}`)
     }
 
     mediaRecorder.onstop = () => {
@@ -207,7 +148,7 @@ export function useStreamRecorder({ onLog }: StreamRecorderProps) {
   }, [])
 
   /**
-   * Setup MediaRecorder with HTTP fallback
+   * Setup MediaRecorder with HTTP fallback (per-camera)
    */
   const setupRecorderHTTP = useCallback((
     mediaRecorder: MediaRecorder,
@@ -242,112 +183,119 @@ export function useStreamRecorder({ onLog }: StreamRecorderProps) {
   }, [])
 
   /**
-   * Start recording all cameras at specified FPS (default 60)
+   * Start recording for a single camera (per-operator session)
    */
   const startRecording = useCallback(async (
-    cameraStreams: Map<string, { stream: MediaStream | null }>,
-    fps: number = 60
+    cameraId: string,
+    stream: MediaStream | null,
+    operatorName: string,
+    fps: number = 60,
+    sessionId?: string
   ) => {
     try {
-      // Generate session ID
-      const sessionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-      sessionIdRef.current = sessionId
+      if (!stream) {
+        onLog?.(`${cameraId}: No stream available`, 'warning')
+        return { success: false, sessionId: null }
+      }
 
-      // Start session on backend
+      // Use provided sessionId or generate new one
+      const actualSessionId = sessionId || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+
+      // Start session on backend for this camera
       const response = await fetch(`${config.apiUrl}/record/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, fps })
+        body: JSON.stringify({
+          session_id: actualSessionId,
+          camera_id: cameraId,
+          operator_name: operatorName,
+          fps
+        })
       })
 
       if (!response.ok) {
         throw new Error(`Backend error: ${response.statusText}`)
       }
 
-      onLog?.(`Recording session started (60 FPS)`, 'info')
+      // Store recording session
+      recordingSessions.current.set(cameraId, {
+        sessionId: actualSessionId,
+        cameraId,
+        operatorName,
+        fps
+      })
 
-      // Connect WebSocket
-      const ws = await connectWebSocket(sessionId, fps)
-      wsRef.current = ws
+      onLog?.(`${cameraId} (${operatorName}): Recording session started @ ${fps} FPS`, 'info')
 
-      // Create recorders for each camera
-      let successCount = 0
-      for (const [cameraId, { stream }] of cameraStreams.entries()) {
-        if (!stream) {
-          console.warn(`[Recorder] ${cameraId}: No stream available`)
-          continue
-        }
+      // Connect WebSocket for this camera
+      const ws = await connectWebSocket(cameraId, actualSessionId, fps)
 
-        const mediaRecorder = createRecorder(cameraId, stream, fps)
-        if (!mediaRecorder) {
-          console.warn(`[Recorder] ${cameraId}: Failed to create recorder`)
-          continue
-        }
+      // Create recorder for this camera
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'video/webm;codecs=vp9,opus',
+        videoBitsPerSecond: fps >= 60 ? 10000000 : 5000000
+      })
 
-        // Setup handlers
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          setupRecorderWebSocket(mediaRecorder, cameraId, ws)
-        } else {
-          setupRecorderHTTP(mediaRecorder, cameraId, sessionId)
-        }
-
-        // Start recording
-        // Request chunks more frequently for 60 FPS (every 500ms for smoother recording)
-        mediaRecorder.start(500)
-
-        recordersRef.current.set(cameraId, {
-          mediaRecorder,
-          cameraId
-        })
-        
-        successCount++
-      }
-
-      if (successCount > 0) {
-        setIsRecording(true)
-        onLog?.(`Recording: ${successCount} camera(s) @ ${fps} FPS`, 'success')
-        return true
+      // Setup handlers
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        setupRecorderWebSocket(mediaRecorder, cameraId, ws)
       } else {
-        throw new Error('No cameras could be started')
+        setupRecorderHTTP(mediaRecorder, cameraId, actualSessionId)
       }
+
+      // Start recording
+      mediaRecorder.start(500)
+
+      recordersRef.current.set(cameraId, {
+        mediaRecorder,
+        cameraId,
+        sessionId: actualSessionId,
+        ws: ws || null
+      })
+
+      setIsRecording(true)
+      onLog?.(`${cameraId}: Recording started`, 'success')
+      return { success: true, sessionId: actualSessionId }
 
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      onLog?.(`Failed to start recording: ${message}`, 'error')
-      return false
+      onLog?.(`${cameraId}: Failed to start recording: ${message}`, 'error')
+      return { success: false, sessionId: null }
     }
-  }, [connectWebSocket, createRecorder, setupRecorderWebSocket, setupRecorderHTTP, onLog])
+  }, [connectWebSocket, setupRecorderWebSocket, setupRecorderHTTP, onLog])
 
   /**
-   * Stop recording all cameras
+   * Stop recording for a single camera
    */
-  const stopRecording = useCallback(async () => {
+  const stopRecording = useCallback(async (cameraId: string) => {
     try {
-      if (!sessionIdRef.current) {
-        onLog?.('No active recording session', 'warning')
+      const recorder = recordersRef.current.get(cameraId)
+      const session = recordingSessions.current.get(cameraId)
+
+      if (!recorder || !session) {
+        onLog?.(`${cameraId}: No active recording`, 'warning')
         return false
       }
 
-      const sessionId = sessionIdRef.current
-
-      // Stop all recorders
-      for (const recorder of recordersRef.current.values()) {
-        if (recorder.mediaRecorder.state !== 'inactive') {
-          recorder.mediaRecorder.stop()
-        }
+      // Stop MediaRecorder
+      if (recorder.mediaRecorder.state !== 'inactive') {
+        recorder.mediaRecorder.stop()
       }
 
       // Wait for final chunks
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      await new Promise(resolve => setTimeout(resolve, 500))
 
-      // Close WebSocket
-      cleanupWebSocket()
+      // Close WebSocket for this camera
+      cleanupWebSocket(cameraId)
 
       // Stop recording on backend
       const response = await fetch(`${config.apiUrl}/record/stop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId })
+        body: JSON.stringify({
+          session_id: session.sessionId,
+          camera_id: cameraId
+        })
       })
 
       if (!response.ok) {
@@ -356,22 +304,21 @@ export function useStreamRecorder({ onLog }: StreamRecorderProps) {
 
       const data = await response.json()
       const duration = data.duration_seconds || 0
-      const cameraCount = data.cameras ? Object.keys(data.cameras).length : 0
 
-      setIsRecording(false)
-      recordersRef.current.clear()
-      sessionIdRef.current = null
+      recordersRef.current.delete(cameraId)
+      recordingSessions.current.delete(cameraId)
 
-      onLog?.(
-        `Recording stopped. Duration: ${duration.toFixed(1)}s, Cameras: ${cameraCount}`,
-        'success'
-      )
+      // Check if any cameras still recording
+      if (recordersRef.current.size === 0) {
+        setIsRecording(false)
+      }
 
+      onLog?.(`${cameraId}: Recording stopped (${duration.toFixed(1)}s)`, 'success')
       return true
 
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      onLog?.(`Failed to stop recording: ${message}`, 'error')
+      onLog?.(`${cameraId}: Failed to stop recording: ${message}`, 'error')
       return false
     }
   }, [cleanupWebSocket, onLog])
@@ -380,7 +327,8 @@ export function useStreamRecorder({ onLog }: StreamRecorderProps) {
     isRecording,
     startRecording,
     stopRecording,
-    sessionId: sessionIdRef.current,
-    isWebSocketConnected: isWebSocketConnected()
+    recordingSessions: recordingSessions.current,
+    isWebSocketConnected,
+    getRecordingSessionId: (cameraId: string) => recordingSessions.current.get(cameraId)?.sessionId || null
   }
 }

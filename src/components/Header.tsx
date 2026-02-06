@@ -2,8 +2,6 @@ import './Header.css'
 
 interface HeaderProps {
   systemActive: boolean
-  wsConnected: boolean
-  mlActive: boolean
   deviceCount: number
   isRecording: boolean
   recordingSessionId?: string | null
@@ -15,11 +13,8 @@ interface HeaderProps {
 
 function Header({ 
   systemActive, 
-  wsConnected, 
-  mlActive, 
   deviceCount,
   isRecording,
-  recordingSessionId,
   operatorName,
   onOperatorNameChange,
   showNameInput,
@@ -98,10 +93,6 @@ function Header({
             <div className={`status-item ${systemActive ? 'active' : ''}`}>
               <span className="status-dot"></span>
               <span className="status-label">System</span>
-            </div>
-            <div className={`status-item ${wsConnected ? 'active' : ''}`}>
-              <span className="status-dot"></span>
-              <span className="status-label">ML Backend</span>
             </div>
             <div className="status-item info">
               <span className="status-icon">📹</span>

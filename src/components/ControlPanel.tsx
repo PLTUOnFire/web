@@ -1,25 +1,31 @@
 import './ControlPanel.css'
 
 interface ControlPanelProps {
-  wsConnected: boolean
   recording: boolean
   systemActive: boolean
+  isCalibrating: boolean
+  calibrationComplete: boolean
+  isTracking: boolean
   onStartCameras: () => void
   onStopCameras: () => void
-  onConnectWS: () => void
   onToggleRecording: () => void
-  recordingSessionId?: string | null
+  onStartCalibration: () => void
+  onStartTracking: () => void
+  onStopTracking: () => void
 }
 
 function ControlPanel({
-  wsConnected,
   recording,
   systemActive,
+  isCalibrating,
+  calibrationComplete,
+  isTracking,
   onStartCameras,
   onStopCameras,
-  onConnectWS,
   onToggleRecording,
-  recordingSessionId
+  onStartCalibration,
+  onStartTracking,
+  onStopTracking
 }: ControlPanelProps) {
   return (
     <div className="control-panel">
@@ -33,19 +39,28 @@ function ControlPanel({
           <span>▶ Start Cameras</span>
         </button>
         <button 
-          className="btn-secondary" 
-          onClick={onConnectWS}
-          disabled={!systemActive}
-        >
-          <span>🔌 {wsConnected ? 'Disconnect' : 'Connect'} ML</span>
-        </button>
-        <button 
           className={recording ? 'btn-danger' : 'btn-secondary'}
           onClick={onToggleRecording}
           disabled={!systemActive}
           style={recording ? { animation: 'pulse 1.5s ease-in-out infinite' } : {}}
         >
           <span>{recording ? '⏹ Stop Recording' : '⏺ Start Recording'}</span>
+        </button>
+        <button 
+          className="btn-secondary" 
+          onClick={onStartCalibration}
+          disabled={!systemActive || isCalibrating || calibrationComplete}
+          title={calibrationComplete ? 'Calibration already complete' : !systemActive ? 'Start camera first' : ''}
+        >
+          <span>🎯 {calibrationComplete ? 'Calibrated ✓' : isCalibrating ? 'Calibrating...' : 'Calibration'}</span>
+        </button>
+        <button 
+          className="btn-secondary" 
+          onClick={isTracking ? onStopTracking : onStartTracking}
+          disabled={!calibrationComplete}
+          title={!calibrationComplete ? 'Complete calibration first' : ''}
+        >
+          <span>{isTracking ? '👁 Stop Eye Tracking' : '👁 Start Eye Tracking'}</span>
         </button>
         <button 
           className="btn-danger" 
@@ -57,7 +72,7 @@ function ControlPanel({
       </div>
 
       {/* Recording Status Banner */}
-      {recording && recordingSessionId && (
+      {recording && (
         <div 
           className="connection-status connected" 
           style={{ 
@@ -70,27 +85,34 @@ function ControlPanel({
             <span style={{ color: '#ff3366' }}>⏺</span>
             <div>
               <div style={{ fontWeight: 700, color: '#ff3366' }}>
-                RECORDING @ 60 FPS (Stream-Based)
+                RECORDING @ 60 FPS
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-mid)', marginTop: '4px' }}>
-                Session: {recordingSessionId.slice(0, 16)}... • WebM format • Browser-native encoding
+                Multi-camera recording active
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* WebSocket Connection Status */}
-      <div className={`connection-status ${wsConnected ? 'connected' : 'disconnected'}`}>
-        <div className="status-text">
-          <span>{wsConnected ? '✓' : '⚠'}</span>
-          <span>
-            {wsConnected
-              ? 'ML backend connected (inference active)'
-              : 'ML backend disconnected. Click "Connect ML" for live inference.'}
-          </span>
+      {/* Calibration Status */}
+      {calibrationComplete && (
+        <div 
+          className="connection-status connected" 
+          style={{ 
+            marginTop: '10px',
+            borderLeftColor: '#00ff88',
+            background: 'rgba(0, 255, 136, 0.05)'
+          }}
+        >
+          <div className="status-text">
+            <span style={{ color: '#00ff88' }}>✓</span>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-mid)' }}>
+              Eye tracking calibrated and ready • {isTracking ? '👁 Tracking active' : 'Ready to start tracking'}
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Info Banner */}
       {!recording && systemActive && (
@@ -105,8 +127,7 @@ function ControlPanel({
           <div className="status-text">
             <span style={{ color: 'var(--accent-info)' }}>ℹ</span>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-mid)' }}>
-              <strong>60 FPS Recording:</strong> Uses MediaRecorder API for efficient capture. 
-              No manual frame processing needed - browser handles video encoding automatically.
+              <strong>Per-Camera System:</strong> Multi-operator eye tracking with independent calibration per camera
             </span>
           </div>
         </div>

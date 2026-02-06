@@ -25,6 +25,7 @@ interface CameraGridProps {
   canvasRefs: Record<string, React.RefObject<HTMLCanvasElement>>
   onDeviceChange: (camId: string, deviceId: string) => void
   onStartCamera: (camId: string, deviceId?: string) => Promise<void>
+  onStopCamera?: (camId: string) => Promise<void>
   isDeviceInUse?: (deviceId: string) => string | null
   isRecording?: boolean
 }
@@ -36,6 +37,7 @@ function CameraGrid({
   canvasRefs,
   onDeviceChange,
   onStartCamera,
+  onStopCamera,
   isDeviceInUse,
   isRecording
 }: CameraGridProps) {
@@ -52,6 +54,7 @@ function CameraGrid({
           availableDevices={availableDevices}
           onDeviceChange={(deviceId) => onDeviceChange(camId, deviceId)}
           onStartCamera={(deviceId) => onStartCamera(camId, deviceId)}
+          onStopCamera={onStopCamera}
           isDeviceInUse={isDeviceInUse}
           isRecording={isRecording}
         />

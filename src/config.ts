@@ -7,8 +7,8 @@ const config = {
   // API Base URL
   apiUrl: 'http://localhost:8000',
   
-  // WebSocket URL
-  wsUrl: 'ws://localhost:8000/ws',
+  // WebSocket Base URL (for multi-operator endpoints: /ws/record/{camera_id}/{session_id})
+  wsUrl: 'ws://localhost:8000',
   
   // API Endpoints
   endpoints: {

@@ -18,10 +18,11 @@ interface CalibrationPoint {
 
 interface CalibrationHookProps {
   sessionId: string
+  cameraId: string
   onLog?: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void
 }
 
-export function useCalibration({ sessionId, onLog }: CalibrationHookProps) {
+export function useCalibration({ sessionId, cameraId, onLog }: CalibrationHookProps) {
   const [isCalibrating, setIsCalibrating] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
   const [totalSteps, setTotalSteps] = useState(0)
@@ -33,17 +34,18 @@ export function useCalibration({ sessionId, onLog }: CalibrationHookProps) {
   const videoRefForCalibration = useRef<HTMLVideoElement | null>(null)
 
   /**
-   * Start calibration process
+   * Start calibration process for specific camera
    */
   const startCalibration = useCallback(async (type: 'standard' | 'multipose' = 'multipose') => {
     try {
-      onLog?.('Starting eye tracking calibration...', 'info')
+      onLog?.(`${cameraId}: Starting eye tracking calibration...`, 'info')
       
       const response = await fetch(`${config.apiUrl}${config.endpoints.calibrationStart}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
+          camera_id: cameraId,
           calibration_type: type
         })
       })
@@ -63,23 +65,24 @@ export function useCalibration({ sessionId, onLog }: CalibrationHookProps) {
       // Get first point
       await loadCalibrationPoint(0)
       
-      onLog?.(`Calibration started: ${data.total_steps} points (${type})`, 'success')
+      onLog?.(`${cameraId}: Calibration started: ${data.total_steps} points (${type})`, 'success')
       
       return true
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      onLog?.(`Calibration start failed: ${message}`, 'error')
+      onLog?.(`${cameraId}: Calibration start failed: ${message}`, 'error')
       return false
     }
-  }, [sessionId, onLog])
+  }, [sessionId, cameraId, onLog])
 
   /**
-   * Load calibration point data for specific step
+   * Load calibration point data for specific step (per-camera)
    */
   const loadCalibrationPoint = useCallback(async (step: number) => {
     try {
+      // Backend format: /calibration/point/{camera_id}/{session_id}/{step}
       const response = await fetch(
-        `${config.apiUrl}${config.endpoints.calibrationPoint}/${sessionId}/${step}`
+        `${config.apiUrl}${config.endpoints.calibrationPoint}/${cameraId}/${sessionId}/${step}`
       )
 
       if (!response.ok) {
@@ -93,13 +96,13 @@ export function useCalibration({ sessionId, onLog }: CalibrationHookProps) {
       return point
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      onLog?.(`Failed to load calibration point: ${message}`, 'error')
+      onLog?.(`${cameraId}: Failed to load calibration point: ${message}`, 'error')
       return null
     }
-  }, [sessionId, onLog])
+  }, [sessionId, cameraId, onLog])
 
   /**
-   * Capture and send calibration sample
+   * Capture and send calibration sample for specific camera
    */
   const captureCalibrationSample = useCallback(async (videoElement: HTMLVideoElement) => {
     try {
@@ -120,12 +123,13 @@ export function useCalibration({ sessionId, onLog }: CalibrationHookProps) {
       ctx.drawImage(videoElement, 0, 0)
       const frameBase64 = canvas.toDataURL('image/jpeg', 0.9)
 
-      // Send to backend
+      // Send to backend with camera_id
       const response = await fetch(`${config.apiUrl}${config.endpoints.calibrationSample}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
+          camera_id: cameraId,
           step: currentStep,
           frame_base64: frameBase64
         })
@@ -142,15 +146,15 @@ export function useCalibration({ sessionId, onLog }: CalibrationHookProps) {
         throw new Error(result.error)
       }
 
-      onLog?.(`Calibration point ${currentStep + 1}/${totalSteps} captured`, 'success')
+      onLog?.(`${cameraId}: Point ${currentStep + 1}/${totalSteps} captured`, 'success')
       
       return result
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      onLog?.(`Sample capture failed: ${message}`, 'error')
+      onLog?.(`${cameraId}: Sample capture failed: ${message}`, 'error')
       return null
     }
-  }, [sessionId, currentStep, currentPoint, totalSteps, onLog])
+  }, [sessionId, cameraId, currentStep, currentPoint, totalSteps, onLog])
 
   /**
    * Move to next calibration point
@@ -168,17 +172,18 @@ export function useCalibration({ sessionId, onLog }: CalibrationHookProps) {
   }, [currentStep, totalSteps, loadCalibrationPoint])
 
   /**
-   * Finish calibration and build model
+   * Finish calibration and build model for specific camera
    */
   const finishCalibration = useCallback(async () => {
     try {
-      onLog?.('Finalizing calibration model...', 'info')
+      onLog?.(`${cameraId}: Finalizing calibration model...`, 'info')
       
       const response = await fetch(`${config.apiUrl}${config.endpoints.calibrationFinish}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session_id: sessionId
+          session_id: sessionId,
+          camera_id: cameraId
         })
       })
 
@@ -197,17 +202,17 @@ export function useCalibration({ sessionId, onLog }: CalibrationHookProps) {
       setCalibrationAccuracy(result.accuracy || 0)
       
       onLog?.(
-        `Calibration complete! Accuracy: ${(result.accuracy * 100).toFixed(1)}%`,
+        `${cameraId}: Calibration complete! Accuracy: ${(result.accuracy * 100).toFixed(1)}%`,
         'success'
       )
       
       return true
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      onLog?.(`Calibration finish failed: ${message}`, 'error')
+      onLog?.(`${cameraId}: Calibration finish failed: ${message}`, 'error')
       return false
     }
-  }, [sessionId, onLog])
+  }, [sessionId, cameraId, onLog])
 
   /**
    * Cancel calibration

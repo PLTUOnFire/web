@@ -14,59 +14,19 @@ export function useWebSocket({ onMessage, onLog }: UseWebSocketProps) {
   const reconnectAttemptsRef = useRef(0)
 
   // Connect to WebSocket with auto-reconnect
+  // NOTE: Legacy hook - backend multi-operator requires /ws/record/{camera_id}/{session_id}
   const connectWebSocket = useCallback(() => {
     try {
-      // Clear any existing connection
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
-
-      wsRef.current = new WebSocket(config.wsUrl)
-
-      wsRef.current.onopen = () => {
-        onLog?.('WebSocket connected successfully', 'success')
-        setWsConnected(true)
-        setMlActive(true)
-        reconnectAttemptsRef.current = 0 // Reset reconnect attempts
-      }
-
-      wsRef.current.onmessage = (event: MessageEvent) => {
-        try {
-          const data = JSON.parse(event.data)
-          onMessage?.(data)
-        } catch (error) {
-          console.error('Failed to parse WebSocket message:', error)
-        }
-      }
-
-      wsRef.current.onerror = (error: Event) => {
-        onLog?.('WebSocket error occurred', 'error')
-        console.error('WebSocket error:', error)
-      }
-
-      wsRef.current.onclose = () => {
-        onLog?.('WebSocket disconnected', 'warning')
-        setWsConnected(false)
-        setMlActive(false)
-
-        // Auto-reconnect with exponential backoff (max 5 attempts)
-        if (reconnectAttemptsRef.current < 5) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000)
-          onLog?.(`Reconnecting in ${delay / 1000}s... (attempt ${reconnectAttemptsRef.current + 1}/5)`, 'info')
-          
-          reconnectTimeoutRef.current = setTimeout(() => {
-            reconnectAttemptsRef.current++
-            connectWebSocket()
-          }, delay)
-        } else {
-          onLog?.('Max reconnection attempts reached. Please click "Connect ML" to retry.', 'error')
-        }
-      }
+      // Backend multi-operator no longer supports /ws endpoint
+      // Use useStreamRecorder for per-camera recording and useEyeTracking for tracking
+      onLog?.('Legacy ML inference WebSocket endpoint deprecated - use per-camera recording instead', 'warning')
+      setWsConnected(false)
+      setMlActive(false)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      onLog?.(`Connection failed: ${message}`, 'error')
+      onLog?.(`Connection setup failed: ${message}`, 'error')
     }
-  }, [onMessage, onLog])
+  }, [onLog])
 
   // Disconnect WebSocket
   const disconnectWebSocket = useCallback(() => {

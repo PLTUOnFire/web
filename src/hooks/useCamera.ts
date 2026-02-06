@@ -190,12 +190,32 @@ export function useCamera() {
    */
   const startCamera = useCallback(async (camId: string, deviceId?: string) => {
     try {
-      // Get device ID
-      const targetDeviceId = deviceId || cameras[camId].selectedDeviceId
+      // Get device ID - try explicit, then selected, then first available
+      let targetDeviceId = deviceId || cameras[camId].selectedDeviceId
 
       if (!targetDeviceId) {
-        console.error(`No device selected for ${camId}`)
-        return false
+        // Auto-select first available device not in use
+        const firstAvailable = availableDevices.find(
+          device => !isDeviceInUse(device.deviceId) || isDeviceInUse(device.deviceId) === camId
+        )
+        
+        if (!firstAvailable) {
+          console.error(`No available device for ${camId}`)
+          return false
+        }
+        
+        targetDeviceId = firstAvailable.deviceId
+        
+        // Update selected device in state
+        setCameras(prev => ({
+          ...prev,
+          [camId]: {
+            ...prev[camId],
+            selectedDeviceId: targetDeviceId
+          }
+        }))
+        
+        console.log(`${camId}: Auto-selected device: ${firstAvailable.label}`)
       }
 
       // Check if device is in use
@@ -258,7 +278,7 @@ export function useCamera() {
       console.error(`Error starting ${camId}:`, error)
       return false
     }
-  }, [cameras, isDeviceInUse, videoRefs])
+  }, [cameras, availableDevices, isDeviceInUse, videoRefs])
 
   /**
    * Stop a single camera
