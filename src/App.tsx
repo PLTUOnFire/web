@@ -3,9 +3,13 @@ import Header from './components/Header'
 import CameraGrid from './components/CameraGrid'
 import ControlPanel from './components/ControlPanel'
 import LogsPanel from './components/LogsPanel'
+import CalibrationScreen from './components/CalibrationScreen'
+import EyeTrackingPanel from './components/EyeTrackingPanel'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useCamera } from './hooks/useCamera'
-import { useRecorder } from './hooks/useRecorder'
+import { useStreamRecorder } from './hooks/useStreamRecorder'
+import { useCalibration } from './hooks/useCalibration'
+import { useEyeTracking } from './hooks/useEyeTracking'
 import './App.css'
 
 interface Log {
@@ -33,16 +37,16 @@ interface MLResult {
 
 function App() {
   const [logs, setLogs] = useState<Log[]>([])
+  const [operatorName, setOperatorName] = useState('Operator-1')
+  const [showNameInput, setShowNameInput] = useState(false)
   const logIdRef = useRef(0)
   const sessionIdRef = useRef(`${Date.now()}-${Math.random()}`)
   const initializedRef = useRef(false)
-  const lastMLResultRef = useRef<MLResult | null>(null)
 
-  // Add log entry - MUST be defined before useWebSocket
+  // Add log entry
   const addLog = (message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
     const timestamp = new Date().toLocaleTimeString()
     logIdRef.current += 1
-    // Create unique ID combining session ID and counter to prevent duplicates on remount
     const uniqueId = `${sessionIdRef.current}-${logIdRef.current}`
     setLogs(prev => [{
       id: uniqueId,
@@ -52,6 +56,7 @@ function App() {
     }, ...prev].slice(0, 50))
   }
 
+  // Camera hook
   const {
     cameras,
     availableDevices,
@@ -68,38 +73,78 @@ function App() {
     startCamera
   } = useCamera()
 
+  // Stream Recorder hook
+  const {
+    isRecording,
+    startRecording,
+    stopRecording,
+    sessionId: recordingSessionId
+  } = useStreamRecorder({
+    onLog: addLog
+  })
+
+  // Calibration hook
+  const {
+    isCalibrating,
+    currentStep,
+    totalSteps,
+    currentPoint,
+    calibrationType,
+    calibrationComplete,
+    calibrationAccuracy,
+    startCalibration,
+    captureCalibrationSample,
+    nextCalibrationPoint,
+    cancelCalibration,
+    getProgress
+  } = useCalibration({
+    sessionId: sessionIdRef.current,
+    onLog: addLog
+  })
+
+  // Eye Tracking hook
+  const {
+    isTracking,
+    latestGazeData,
+    alertLevel,
+    isConnected: eyeTrackingConnected,
+    startTracking,
+    stopTracking
+  } = useEyeTracking({
+    sessionId: sessionIdRef.current,
+    onLog: addLog,
+    onGazeData: (data) => {
+      // Update camera metrics from eye tracking
+      if (data.eye_metrics) {
+        updateCameraMetrics('cam1', {
+          drowsy: Math.round(data.eye_metrics.perclos * 100),
+          stress: data.alert.level === 'critical' ? 100 : data.alert.level === 'danger' ? 75 : 30,
+          confidence: Math.round((1 - data.eye_metrics.ear) * 100)
+        })
+      }
+    }
+  })
+
+  // WebSocket hook for ML inference (legacy - optional)
   const {
     wsConnected,
     mlActive,
     connectWebSocket,
+    disconnectWebSocket,
     sendFrame
   } = useWebSocket({
     onMessage: handleMLResult,
     onLog: addLog
   })
 
-  const {
-    isRecording,
-    startRecording,
-    stopRecording,
-    sendFrame: sendRecorderFrame
-  } = useRecorder({
-    onLog: addLog
-  })
-
-  // Handle ML results from WebSocket
+  // Handle ML results from WebSocket (legacy)
   function handleMLResult(data: MLResult) {
     const camId = data.camera_id || 'cam1'
     
-    // Store last ML result for recording
-    lastMLResultRef.current = data
-    
-    // Update face detection status
     if (data.face !== undefined) {
       updateCameraFace(camId, data.face)
     }
     
-    // Update metrics
     const metrics: Record<string, number> = {}
     if (data.drowsy !== undefined) {
       metrics.drowsy = Math.round(data.drowsy * 100)
@@ -115,7 +160,6 @@ function App() {
       updateCameraMetrics(camId, metrics)
     }
     
-    // Draw bounding boxes
     if (data.boxes && data.boxes.length > 0) {
       drawBoundingBoxes(camId, data.boxes)
     }
@@ -137,52 +181,39 @@ function App() {
       const w = box.w * canvas.width
       const h = box.h * canvas.height
       
-      // Draw box
       ctx.strokeStyle = '#00ff88'
       ctx.lineWidth = 3
       ctx.strokeRect(x, y, w, h)
       
-      // Draw label
       ctx.fillStyle = '#00ff88'
       ctx.font = 'bold 16px Rajdhani'
       const label = `${box.label} ${Math.round(box.score * 100)}%`
       const textWidth = ctx.measureText(label).width
       
-      // Background for text
       ctx.fillStyle = 'rgba(0, 255, 136, 0.8)'
       ctx.fillRect(x, y - 25, textWidth + 10, 20)
       
-      // Text
       ctx.fillStyle = '#0a0d12'
       ctx.fillText(label, x + 5, y - 10)
     })
   }
 
-  // Auto-send frames to backend and recorder
+  // ML inference interval (legacy - optional)
   useEffect(() => {
-    if (!wsConnected && !isRecording) return
+    if (!wsConnected) return
     
     const interval = setInterval(() => {
       Object.keys(streamsRef.current).forEach(camId => {
-        const videoRef = videoRefs[camId as 'cam1' | 'cam2' | 'cam3']?.current
-        if (streamsRef.current[camId] && videoRef) {
-          // Send to ML backend if connected
-          if (wsConnected) {
-            sendFrame(camId, videoRef)
-          }
-          
-          // Send to recorder if recording
-          if (isRecording) {
-            sendRecorderFrame(camId, videoRef, lastMLResultRef.current)
-          }
+        if (streamsRef.current[camId]) {
+          sendFrame(camId, videoRefs[camId as 'cam1' | 'cam2' | 'cam3']?.current)
         }
       })
     }, 200)
     
     return () => clearInterval(interval)
-  }, [wsConnected, isRecording, streamsRef, videoRefs, sendFrame, sendRecorderFrame])
+  }, [wsConnected, streamsRef, videoRefs, sendFrame])
 
-  // Handle start cameras
+  // Start cameras
   const handleStartCameras = async () => {
     addLog('Initializing camera access...', 'info')
     const success = await startAllCameras()
@@ -191,75 +222,191 @@ function App() {
     }
   }
 
-  // Handle stop cameras
+  // Stop cameras
   const handleStopCameras = () => {
+    if (isRecording) {
+      stopRecording()
+    }
+    if (isTracking) {
+      stopTracking()
+    }
     stopAllCameras()
     addLog('All cameras stopped', 'info')
   }
 
-  // Handle connect WebSocket
-  const handleConnectWS = () => {
-    addLog('Connecting to ML backend...', 'info')
-    connectWebSocket()
+  // Start calibration
+  const handleStartCalibration = async () => {
+    // Check if camera is active
+    if (!cameras.cam1.active) {
+      addLog('Please start camera first', 'warning')
+      return
+    }
+
+    const success = await startCalibration('multipose')
+    if (success) {
+      addLog('Calibration started - follow on-screen instructions', 'info')
+    }
+  }
+
+  // Start eye tracking
+  const handleStartEyeTracking = () => {
+    if (!calibrationComplete) {
+      addLog('Please complete calibration first', 'warning')
+      return
+    }
+
+    const videoElement = videoRefs.cam1?.current
+    if (!videoElement) {
+      addLog('Camera not available', 'error')
+      return
+    }
+
+    startTracking(videoElement)
+  }
+
+  // Stop eye tracking
+  const handleStopEyeTracking = () => {
+    stopTracking()
   }
 
   // Handle recording toggle
   const handleToggleRecording = async () => {
-    if (!isRecording) {
-      const success = await startRecording()
-      if (!success) {
-        addLog('Failed to start recording', 'error')
-      }
+    if (isRecording) {
+      await stopRecording()
     } else {
-      const success = await stopRecording()
-      if (!success) {
-        addLog('Failed to stop recording', 'error')
+      const activeCameras = Object.entries(cameras)
+        .filter(([_, cam]) => cam.active)
+      
+      if (activeCameras.length === 0) {
+        addLog('No active cameras to record', 'warning')
+        return
+      }
+
+      const cameraStreams = new Map()
+      
+      if (cameras.cam1.active && streamsRef.current.cam1) {
+        cameraStreams.set('cam1', { stream: streamsRef.current.cam1 })
+      }
+      if (cameras.cam2.active && streamsRef.current.cam2) {
+        cameraStreams.set('cam2', { stream: streamsRef.current.cam2 })
+      }
+      if (cameras.cam3.active && streamsRef.current.cam3) {
+        cameraStreams.set('cam3', { stream: streamsRef.current.cam3 })
+      }
+
+      // Start backend session first
+      try {
+        const response = await fetch('http://localhost:8000/record/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: sessionIdRef.current,
+            operator_name: operatorName,
+            fps: 60
+          })
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to start backend session')
+        }
+
+        // Then start recording
+        const success = await startRecording(cameraStreams, 60)
+        
+        if (!success) {
+          addLog('Failed to start recording', 'error')
+        }
+      } catch (error) {
+        addLog(`Failed to start session: ${error}`, 'error')
       }
     }
   }
 
-  // Initialize logs and get available devices
+  // Handle device change
+  const handleDeviceChange = async (camId: string, deviceId: string) => {
+    if (isRecording) {
+      addLog('Cannot change devices while recording', 'warning')
+      return
+    }
+    
+    setSelectedDevice(camId, deviceId)
+    
+    if (cameras[camId as keyof typeof cameras].active) {
+      addLog(`Switching ${camId} to new device...`, 'info')
+      await startCamera(camId, deviceId)
+    }
+  }
+
+  // Initialize
   useEffect(() => {
     if (!initializedRef.current) {
       initializedRef.current = true
-      addLog('Vision Nexus ML Monitoring System initialized', 'success')
-      addLog('Ready to start cameras and connect to ML backend', 'info')
+      addLog('PLTU Eye Tracking System v4.0 initialized', 'success')
+      addLog('Eye tracking + 60 FPS recording available', 'info')
       
-      // Get and log available devices
       getAvailableDevices().then(devices => {
         if (devices.length > 0) {
-          addLog(`Found ${devices.length} camera device(s).`, 'info')
-          // Auto-select first device if only one is available
-          if (devices.length === 1) {
-            setSelectedDevice('cam1', devices[0].deviceId)
-            addLog(`Auto-selected device: ${devices[0].label}`, 'info')
-          }
+          addLog(`Found ${devices.length} camera device(s)`, 'info')
         } else {
-          addLog('No camera devices found! Please check permissions and camera hardware.', 'warning')
+          addLog('No camera devices found!', 'warning')
         }
       })
     }
-  }, [setSelectedDevice, addLog])
+  }, [])
 
   const systemActive = Object.values(cameras).some(cam => cam.active)
 
-  const handleDeviceChange = (camId: string, deviceId: string) => {
-    setSelectedDevice(camId, deviceId)
-  }
-
   const handleStartCamera = async (camId: string, deviceId?: string) => {
+    if (isRecording) {
+      addLog('Cannot start individual camera while recording', 'warning')
+      return
+    }
     await startCamera(camId, deviceId)
   }
 
   return (
     <div className="app">
+      {/* Calibration Screen (Full-screen overlay) */}
+      {isCalibrating && currentPoint && videoRefs.cam1?.current && (
+        <CalibrationScreen
+          currentPoint={currentPoint}
+          currentStep={currentStep}
+          totalSteps={totalSteps}
+          videoElement={videoRefs.cam1.current}
+          onCaptureSample={captureCalibrationSample}
+          onNext={nextCalibrationPoint}
+          onCancel={cancelCalibration}
+          calibrationType={calibrationType}
+        />
+      )}
+
       <div className="container">
         <Header 
           systemActive={systemActive}
           wsConnected={wsConnected}
           mlActive={mlActive}
           deviceCount={availableDevices.length}
+          isRecording={isRecording}
+          recordingSessionId={recordingSessionId}
+          operatorName={operatorName}
+          onOperatorNameChange={(name) => {
+            setOperatorName(name)
+            setShowNameInput(false)
+          }}
+          showNameInput={showNameInput}
+          onShowNameInput={() => setShowNameInput(!showNameInput)}
         />
+        
+        {/* Eye Tracking Panel */}
+        {(calibrationComplete || isTracking) && (
+          <EyeTrackingPanel
+            gazeData={latestGazeData}
+            isTracking={isTracking}
+            isCalibrated={calibrationComplete}
+            calibrationAccuracy={calibrationAccuracy}
+            alertLevel={alertLevel}
+          />
+        )}
         
         <CameraGrid 
           cameras={cameras}
@@ -269,15 +416,24 @@ function App() {
           onDeviceChange={handleDeviceChange}
           onStartCamera={handleStartCamera}
           isDeviceInUse={isDeviceInUse}
+          isRecording={isRecording}
         />
         
         <ControlPanel
           wsConnected={wsConnected}
           recording={isRecording}
+          systemActive={systemActive}
+          isCalibrating={isCalibrating}
+          calibrationComplete={calibrationComplete}
+          isTracking={isTracking}
           onStartCameras={handleStartCameras}
           onStopCameras={handleStopCameras}
-          onConnectWS={handleConnectWS}
+          onConnectWS={connectWebSocket}
           onToggleRecording={handleToggleRecording}
+          onStartCalibration={handleStartCalibration}
+          onStartTracking={handleStartEyeTracking}
+          onStopTracking={handleStopEyeTracking}
+          recordingSessionId={recordingSessionId}
         />
         
         <LogsPanel logs={logs} />

@@ -26,6 +26,7 @@ interface CameraGridProps {
   onDeviceChange: (camId: string, deviceId: string) => void
   onStartCamera: (camId: string, deviceId?: string) => Promise<void>
   isDeviceInUse?: (deviceId: string) => string | null
+  isRecording?: boolean
 }
 
 function CameraGrid({ 
@@ -35,7 +36,8 @@ function CameraGrid({
   canvasRefs,
   onDeviceChange,
   onStartCamera,
-  isDeviceInUse
+  isDeviceInUse,
+  isRecording
 }: CameraGridProps) {
   return (
     <div className="camera-grid">
@@ -51,6 +53,7 @@ function CameraGrid({
           onDeviceChange={(deviceId) => onDeviceChange(camId, deviceId)}
           onStartCamera={(deviceId) => onStartCamera(camId, deviceId)}
           isDeviceInUse={isDeviceInUse}
+          isRecording={isRecording}
         />
       ))}
     </div>

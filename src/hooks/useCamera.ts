@@ -1,513 +1,377 @@
+/**
+ * Hook for Camera Management (Multi-Operator)
+ * Each camera = 1 operator with independent session
+ */
+
 import { useState, useRef, useCallback } from 'react'
-import config from '../config'
+
+interface CameraMetrics {
+  drowsy: number
+  stress: number
+  confidence: number
+}
 
 interface Camera {
   active: boolean
   fps: number
-  metrics: {
-    drowsy: number
-    stress: number
-    confidence: number
-  }
+  metrics: CameraMetrics
   face: boolean
   selectedDeviceId?: string
+  operatorName?: string
+  recording?: boolean
+  sessionId?: string
+  calibrated?: boolean
+  tracking?: boolean
 }
 
 interface CameraDevice {
   deviceId: string
   label: string
-  index?: number
-}
-
-interface CameraRefs {
-  [key: string]: React.RefObject<HTMLVideoElement | null>
-}
-
-interface CanvasRefs {
-  [key: string]: React.RefObject<HTMLCanvasElement | null>
-}
-
-interface StreamsRef {
-  [key: string]: MediaStream | undefined
-}
-
-interface FPSIntervalsRef {
-  [key: string]: number
 }
 
 export function useCamera() {
   const [cameras, setCameras] = useState<Record<string, Camera>>({
-    cam1: { active: false, fps: 0, metrics: { drowsy: 0, stress: 0, confidence: 0 }, face: false },
-    cam2: { active: false, fps: 0, metrics: { drowsy: 0, stress: 0, confidence: 0 }, face: false },
-    cam3: { active: false, fps: 0, metrics: { drowsy: 0, stress: 0, confidence: 0 }, face: false }
+    cam1: {
+      active: false,
+      fps: 60,
+      metrics: { drowsy: 0, stress: 0, confidence: 0 },
+      face: false,
+      operatorName: 'Operator-1',
+      recording: false,
+      calibrated: false,
+      tracking: false
+    },
+    cam2: {
+      active: false,
+      fps: 60,
+      metrics: { drowsy: 0, stress: 0, confidence: 0 },
+      face: false,
+      operatorName: 'Operator-2',
+      recording: false,
+      calibrated: false,
+      tracking: false
+    },
+    cam3: {
+      active: false,
+      fps: 60,
+      metrics: { drowsy: 0, stress: 0, confidence: 0 },
+      face: false,
+      operatorName: 'Operator-3',
+      recording: false,
+      calibrated: false,
+      tracking: false
+    }
   })
 
   const [availableDevices, setAvailableDevices] = useState<CameraDevice[]>([])
 
-  const videoRefs: CameraRefs = {
+  // Refs for video elements
+  const videoRefs = {
     cam1: useRef<HTMLVideoElement>(null),
     cam2: useRef<HTMLVideoElement>(null),
     cam3: useRef<HTMLVideoElement>(null)
   }
 
-  const canvasRefs: CanvasRefs = {
+  // Refs for canvas elements (for drawing overlays)
+  const canvasRefs = {
     cam1: useRef<HTMLCanvasElement>(null),
     cam2: useRef<HTMLCanvasElement>(null),
     cam3: useRef<HTMLCanvasElement>(null)
   }
 
-  const streamsRef = useRef<StreamsRef>({})
-  const fpsIntervalsRef = useRef<FPSIntervalsRef>({})
-  
-  // Track AbortControllers for each camera to cancel pending getUserMedia calls
-  const abortControllersRef = useRef<Record<string, AbortController>>({
-    cam1: new AbortController(),
-    cam2: new AbortController(),
-    cam3: new AbortController()
+  // Ref to store actual MediaStream objects
+  const streamsRef = useRef<Record<string, MediaStream | null>>({
+    cam1: null,
+    cam2: null,
+    cam3: null
   })
 
-  // Enumerate available camera devices
+  /**
+   * Get available camera devices
+   */
   const getAvailableDevices = useCallback(async () => {
     try {
-      // Request permission first to get proper device labels
-      // This is needed because device.label is empty until permission is granted
-      try {
-        const permissionStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1920 }, height: { ideal: 1080 } }
-        })
-        // Stop immediately after getting permission - we just need the labels
-        permissionStream.getTracks().forEach(track => track.stop())
-        console.log('Camera permission granted, enumerating devices with proper labels...')
-      } catch (permError) {
-        console.warn('Could not auto-request camera permission, continuing with enumeration...', permError)
-      }
-
       const devices = await navigator.mediaDevices.enumerateDevices()
       const videoDevices = devices
-        .filter(d => d.kind === 'videoinput')
-        .map((d, index) => {
-          // Create unique label including index if devices have same ID
-          const baseLabel = d.label || `Camera ${d.deviceId.slice(0, 5)}`
-          const fullLabel = `${baseLabel} [ID: ${d.deviceId.slice(0, 8)}...]`
-          return {
-            deviceId: d.deviceId,
-            label: fullLabel,
-            index: index
-          }
-        })
-      
-      // Log device details untuk debugging
-      console.log('Available Devices:', videoDevices)
-      videoDevices.forEach((dev, idx) => {
-        console.log(`Device ${idx + 1}: ${dev.label}`)
-      })
-      
+        .filter(device => device.kind === 'videoinput')
+        .map(device => ({
+          deviceId: device.deviceId,
+          label: device.label || `Camera ${device.deviceId.slice(0, 5)}`
+        }))
+
       setAvailableDevices(videoDevices)
       return videoDevices
     } catch (error) {
-      console.error('Failed to enumerate devices:', error)
+      console.error('Error getting devices:', error)
       return []
     }
   }, [])
 
-  // Set selected device for a camera
-  const setSelectedDevice = useCallback((camId: string, deviceId: string) => {
-    setCameras(prev => ({
-      ...prev,
-      [camId]: { ...prev[camId], selectedDeviceId: deviceId }
-    }))
-  }, [])
-
-  // Update camera metrics
-  const updateCameraMetrics = useCallback((camId: string, metrics: Partial<Camera['metrics']>) => {
-    setCameras(prev => ({
-      ...prev,
-      [camId]: {
-        ...prev[camId],
-        metrics: { ...prev[camId].metrics, ...metrics }
-      }
-    }))
-  }, [])
-
-  // Update camera face detection
-  const updateCameraFace = useCallback((camId: string, face: boolean) => {
-    setCameras(prev => ({
-      ...prev,
-      [camId]: { ...prev[camId], face }
-    }))
-  }, [])
-
-  // Update camera FPS
-  const updateCameraFPS = useCallback((camId: string, fps: number) => {
-    setCameras(prev => ({
-      ...prev,
-      [camId]: { ...prev[camId], fps }
-    }))
-  }, [])
-
-  // Set camera active state
-  const setCameraActive = useCallback((camId: string, active: boolean) => {
-    setCameras(prev => ({
-      ...prev,
-      [camId]: { ...prev[camId], active }
-    }))
-  }, [])
-
-  // Start FPS counter
-  const startFPSCounter = useCallback((camId: string) => {
-    let lastTime = Date.now()
-    let frames = 0
-
-    const updateFPS = () => {
-      frames++
-      const now = Date.now()
-      const elapsed = now - lastTime
-
-      if (elapsed >= 1000) {
-        const fps = Math.round((frames * 1000) / elapsed)
-        // Update directly without dependency
-        setCameras(prev => ({
-          ...prev,
-          [camId]: { ...prev[camId], fps }
-        }))
-        frames = 0
-        lastTime = now
-      }
-
-      if (streamsRef.current[camId]) {
-        fpsIntervalsRef.current[camId] = requestAnimationFrame(updateFPS)
-      }
-    }
-
-    updateFPS()
-  }, [])
-
-  // Check if device is already in use by another camera
-  const isDeviceInUse = useCallback((targetDeviceId: string, excludeCamId?: string) => {
+  /**
+   * Check if a device is already in use
+   */
+  const isDeviceInUse = useCallback((deviceId: string): string | null => {
     for (const [camId, camera] of Object.entries(cameras)) {
-      if (excludeCamId && camId === excludeCamId) continue
-      // Only prevent if EXACT same device is being used by another active camera
-      // For cameras with same device ID (identical models), allow both to try
-      if (camera.selectedDeviceId === targetDeviceId && camera.active) {
+      if (camera.active && camera.selectedDeviceId === deviceId) {
         return camId
       }
     }
     return null
   }, [cameras])
 
-  // Start individual camera dengan retry logic
-  const startCamera = useCallback(async (camId: string, deviceId?: string, retryCount = 0) => {
-    const MAX_RETRIES = 3
-    const RETRY_DELAY = 1000 // 1 second
-    
+  /**
+   * Set selected device for a camera
+   */
+  const setSelectedDevice = useCallback((camId: string, deviceId: string) => {
+    setCameras(prev => ({
+      ...prev,
+      [camId]: {
+        ...prev[camId],
+        selectedDeviceId: deviceId
+      }
+    }))
+  }, [])
+
+  /**
+   * Set operator name for a camera
+   */
+  const setOperatorName = useCallback((camId: string, name: string) => {
+    setCameras(prev => ({
+      ...prev,
+      [camId]: {
+        ...prev[camId],
+        operatorName: name
+      }
+    }))
+  }, [])
+
+  /**
+   * Set recording status for a camera
+   */
+  const setRecording = useCallback((camId: string, recording: boolean, sessionId?: string) => {
+    setCameras(prev => ({
+      ...prev,
+      [camId]: {
+        ...prev[camId],
+        recording,
+        sessionId: recording ? sessionId : undefined
+      }
+    }))
+  }, [])
+
+  /**
+   * Set calibration status for a camera
+   */
+  const setCalibrated = useCallback((camId: string, calibrated: boolean) => {
+    setCameras(prev => ({
+      ...prev,
+      [camId]: {
+        ...prev[camId],
+        calibrated
+      }
+    }))
+  }, [])
+
+  /**
+   * Set tracking status for a camera
+   */
+  const setTracking = useCallback((camId: string, tracking: boolean) => {
+    setCameras(prev => ({
+      ...prev,
+      [camId]: {
+        ...prev[camId],
+        tracking
+      }
+    }))
+  }, [])
+
+  /**
+   * Start a single camera
+   */
+  const startCamera = useCallback(async (camId: string, deviceId?: string) => {
     try {
-      // Cancel any pending operations from previous calls
-      const currentAbortController = abortControllersRef.current[camId]
-      if (currentAbortController) {
-        console.log(`[${camId}] Aborting previous operations...`)
-        currentAbortController.abort()
-        // Give abort signal time to propagate
-        await new Promise(resolve => setTimeout(resolve, 100))
+      // Get device ID
+      const targetDeviceId = deviceId || cameras[camId].selectedDeviceId
+
+      if (!targetDeviceId) {
+        console.error(`No device selected for ${camId}`)
+        return false
       }
-      
-      // Create new AbortController for this attempt
-      abortControllersRef.current[camId] = new AbortController()
-      const newAbortController = abortControllersRef.current[camId]
-      
-      console.log(`[${camId}] Starting fresh (attempt ${retryCount + 1}/${MAX_RETRIES + 1})`)
-      
-      // Stop existing stream first - cleanup old streams immediately
-      const video = videoRefs[camId].current
+
+      // Check if device is in use
+      const inUse = isDeviceInUse(targetDeviceId)
+      if (inUse && inUse !== camId) {
+        console.error(`Device already in use by ${inUse}`)
+        return false
+      }
+
+      // Stop existing stream if any
       if (streamsRef.current[camId]) {
-        const oldStream = streamsRef.current[camId]
-        console.log(`[${camId}] Stopping old stream...`)
-        
-        // Immediately detach video from old stream to prevent issues
-        if (video) {
-          video.srcObject = null
-        }
-        
-        // Stop all tracks
-        oldStream?.getTracks().forEach(track => {
-          try {
-            track.stop()
-            console.log(`[${camId}] Stopped track`)
-          } catch (e) {
-            console.warn(`[${camId}] Error stopping track:`, e)
-          }
-        })
-        delete streamsRef.current[camId]
+        streamsRef.current[camId]?.getTracks().forEach(track => track.stop())
+        streamsRef.current[camId] = null
       }
 
-      // Cancel any FPS counter that was running
-      if (fpsIntervalsRef.current[camId]) {
-        cancelAnimationFrame(fpsIntervalsRef.current[camId])
-        delete fpsIntervalsRef.current[camId]
-      }
-
-      // Use provided deviceId first, then fallback to selected device
-      let selectedDeviceId = deviceId
-      if (!selectedDeviceId && cameras[camId]) {
-        selectedDeviceId = cameras[camId].selectedDeviceId
-        console.log(`[${camId}] Got selectedDeviceId from state: ${selectedDeviceId}`)
-      }
-      
-      if (!selectedDeviceId) {
-        throw new Error(`No device ID provided for ${camId}`)
-      }
-      
-      console.log(`[${camId}] Attempting to start with device: ${selectedDeviceId.slice(0, 8)}... (attempt ${retryCount + 1}/${MAX_RETRIES + 1})`)
-      
-      // Smart frame rate based on camera number for USB stability at 1080p
-      const frameRate = camId === 'cam3' ? 30 : 45 // cam3 gets 30fps, others get 45fps
-      
+      // Request camera with high resolution for 60 FPS
       const constraints: MediaStreamConstraints = {
         video: {
-          deviceId: { exact: selectedDeviceId },
+          deviceId: { exact: targetDeviceId },
           width: { ideal: 1920 },
           height: { ideal: 1080 },
-          frameRate: { ideal: frameRate, max: frameRate }
-        }
+          frameRate: { ideal: 60, max: 60 }
+        },
+        audio: false
       }
 
-      console.log(`[${camId}] Constraints applied (${frameRate}fps)`)
-      
-      // Check if this operation was aborted before we proceed
-      if (newAbortController.signal.aborted) {
-        console.log(`[${camId}] Operation cancelled before getUserMedia`)
-        return false
-      }
-      
-      // Add timeout for getUserMedia with better error handling
-      let timeoutId: ReturnType<typeof setTimeout>
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error('getUserMedia timeout after 10 seconds'))
-        }, 10000)
-      })
-      
-      console.log(`[${camId}] Calling getUserMedia...`)
-      const stream = await Promise.race([
-        navigator.mediaDevices.getUserMedia(constraints),
-        timeoutPromise
-      ])
-      
-      // Clear timeout since we got a response
-      clearTimeout(timeoutId!)
-      
-      // Check again if operation was aborted while waiting
-      if (newAbortController.signal.aborted) {
-        console.log(`[${camId}] Operation cancelled after getUserMedia, stopping stream`)
-        stream.getTracks().forEach(track => track.stop())
-        return false
-      }
-      
-      console.log(`[${camId}] Stream started successfully`)
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
 
-      if (video && !newAbortController.signal.aborted) {
-        // Setup a cleanup handler for when abort signal fires
-        const cleanup = () => {
-          console.log(`[${camId}] Abort signal detected, cleaning up video element`)
-          if (video.srcObject === stream) {
-            video.srcObject = null
-          }
-          // Also set camera to inactive when abort happens
-          setCameraActive(camId, false)
-          stream.getTracks().forEach(track => {
-            try {
-              track.stop()
-            } catch (e) {
-              console.warn(`[${camId}] Error stopping track during cleanup:`, e)
-            }
-          })
-        }
+      // Set video element source
+      const videoElement = videoRefs[camId as 'cam1' | 'cam2' | 'cam3']?.current
+      if (videoElement) {
+        videoElement.srcObject = stream
+        await videoElement.play()
 
-        // Register cleanup when abort fires
-        newAbortController.signal.addEventListener('abort', cleanup, { once: true })
+        // Get actual FPS
+        const track = stream.getVideoTracks()[0]
+        const settings = track.getSettings()
+        const actualFps = settings.frameRate || 60
 
-        // Only attach stream if not already aborted
-        console.log(`[${camId}] Attaching stream to video element...`)
-        video.srcObject = stream
+        // Store stream
         streamsRef.current[camId] = stream
 
-        // Setup metadata listener with abort awareness
-        const metadataHandler = () => {
-          // Only process if operation is not aborted
-          if (!newAbortController.signal.aborted) {
-            console.log(`[${camId}] Video metadata loaded - ${video.videoWidth}x${video.videoHeight}`)
-            const canvas = canvasRefs[camId].current
-            if (canvas) {
-              canvas.width = video.videoWidth
-              canvas.height = video.videoHeight
-            }
-            // IMPORTANT: Set camera active only AFTER metadata is loaded
-            setCameraActive(camId, true)
-            // Also auto-select the device in dropdown if not already selected
-            const currentDevice = cameras[camId as 'cam1' | 'cam2' | 'cam3']?.selectedDeviceId
-            if (!currentDevice) {
-              // Get the device ID from the stream tracks
-              const videoTrack = stream.getVideoTracks()[0]
-              const trackDeviceId = videoTrack?.getSettings().deviceId || videoTrack?.getCapabilities().deviceId
-              if (trackDeviceId) {
-                setSelectedDevice(camId, trackDeviceId)
-                console.log(`[${camId}] Auto-selected device in dropdown: ${trackDeviceId.slice(0, 8)}...`)
-              }
-            }
-            startFPSCounter(camId)
-          } else {
-            console.log(`[${camId}] Metadata loaded but operation already aborted, ignoring`)
+        // Update camera state
+        setCameras(prev => ({
+          ...prev,
+          [camId]: {
+            ...prev[camId],
+            active: true,
+            fps: actualFps,
+            selectedDeviceId: targetDeviceId
           }
-        }
+        }))
 
-        video.addEventListener('loadedmetadata', metadataHandler, { once: true })
-
-        // If abort fires before metadata, remove listener
-        newAbortController.signal.addEventListener('abort', () => {
-          video.removeEventListener('loadedmetadata', metadataHandler)
-        }, { once: true })
-
+        console.log(`${camId} started @ ${actualFps} FPS`)
         return true
-      } else {
-        console.log(`[${camId}] Video element not available or operation aborted`)
-        stream.getTracks().forEach(track => track.stop())
-        return false
       }
+
+      return false
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      
-      // Check if error was due to abort
-      if (errorMessage.includes('AbortError') || errorMessage.includes('NotAllowedError')) {
-        console.log(`[${camId}] Operation cancelled or denied`)
-        return false
-      }
-      
-      console.error(`[${camId}] Failed to start (attempt ${retryCount + 1}):`, errorMessage)
-      
-      // Retry logic untuk timeout atau temporary errors
-      if ((errorMessage.includes('Timeout') || errorMessage.includes('NotReadableError')) && retryCount < MAX_RETRIES) {
-        console.log(`[${camId}] Retrying in ${RETRY_DELAY}ms...`)
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
-        return startCamera(camId, deviceId, retryCount + 1)
-      }
-      
-      setCameraActive(camId, false)
+      console.error(`Error starting ${camId}:`, error)
       return false
     }
-  }, [videoRefs, canvasRefs, setCameraActive, startFPSCounter, cameras])
+  }, [cameras, isDeviceInUse, videoRefs])
 
-  // Start all cameras
-  const startAllCameras = useCallback(async () => {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices()
-      const videoDevices = devices.filter(d => d.kind === 'videoinput')
-
-      if (videoDevices.length === 0) {
-        console.error('No cameras detected!')
-        return false
-      }
-
-      // Check if devices are already selected in state, if so use them
-      // Otherwise use default assignment: cam1=first, cam2=secondLast, cam3=last
-      const maxCameras = Math.min(config.camera.maxCameras, videoDevices.length)
-      const camerasToStart: Array<{ camId: string; deviceId: string }> = []
-      
-      for (let i = 0; i < maxCameras; i++) {
-        const camId = `cam${i + 1}`
-        const selectedDeviceId = cameras[camId as 'cam1' | 'cam2' | 'cam3']?.selectedDeviceId
-        
-        // Use selected device if available, otherwise use ONLY the first device
-        // This avoids issues with virtual cameras (OBS, Iriun, NVIDIA Broadcast) that may not be running
-        let deviceToUse: string
-        
-        if (selectedDeviceId) {
-          // User has already selected a device for this camera
-          deviceToUse = selectedDeviceId
-          console.log(`[${camId}] Using pre-selected device: ${selectedDeviceId}`)
-        } else {
-          // Default: all cameras use the first available device (real camera, not virtual)
-          deviceToUse = videoDevices[0].deviceId
-          console.log(`[${camId}] Using default device (index 0): ${videoDevices[0].label}`)
-        }
-        
-        camerasToStart.push({ camId, deviceId: deviceToUse })
-      }
-
-      // Start cameras SEQUENTIALLY with delay to avoid USB power surge
-      // Instead of Promise.all() which starts all at once
-      const STARTUP_DELAY = 3000 // 3000ms delay between each camera start for 1080p stability
-      for (let i = 0; i < camerasToStart.length; i++) {
-        const { camId, deviceId } = camerasToStart[i]
-        console.log(`Starting ${camId} (${i + 1}/${camerasToStart.length})...`)
-        
-        // Start this camera
-        await startCamera(camId, deviceId)
-        
-        // Add delay before next camera (except for last one)
-        if (i < camerasToStart.length - 1) {
-          console.log(`Waiting ${STARTUP_DELAY}ms before next camera...`)
-          await new Promise(resolve => setTimeout(resolve, STARTUP_DELAY))
-        }
-      }
-
-      return true
-    } catch (error) {
-      console.error('Camera initialization error:', error)
-      return false
+  /**
+   * Stop a single camera
+   */
+  const stopCamera = useCallback((camId: string) => {
+    // Stop stream
+    if (streamsRef.current[camId]) {
+      streamsRef.current[camId]?.getTracks().forEach(track => track.stop())
+      streamsRef.current[camId] = null
     }
-  }, [startCamera, cameras])
 
-  // Stop all cameras
-  const stopAllCameras = useCallback(() => {
-    // Abort all pending operations
-    Object.entries(abortControllersRef.current).forEach(([camId, controller]) => {
-      controller.abort()
-      console.log(`[${camId}] Aborted all pending operations`)
-    })
-    
-    Object.entries(streamsRef.current).forEach(([camId, stream]) => {
-      if (stream) {
-        stream.getTracks().forEach(track => {
-          try {
-            track.stop()
-          } catch (e) {
-            console.warn(`[${camId}] Error stopping track:`, e)
-          }
-        })
-        const video = videoRefs[camId].current
-        if (video) video.srcObject = null
+    // Clear video element
+    const videoElement = videoRefs[camId as 'cam1' | 'cam2' | 'cam3']?.current
+    if (videoElement) {
+      videoElement.srcObject = null
+    }
+
+    // Update state
+    setCameras(prev => ({
+      ...prev,
+      [camId]: {
+        ...prev[camId],
+        active: false,
+        face: false,
+        tracking: false
       }
+    }))
 
-      // Cancel FPS counter
-      if (fpsIntervalsRef.current[camId]) {
-        cancelAnimationFrame(fpsIntervalsRef.current[camId])
-      }
-    })
-
-    streamsRef.current = {}
-    fpsIntervalsRef.current = {}
-
-    setCameras({
-      cam1: { active: false, fps: 0, metrics: { drowsy: 0, stress: 0, confidence: 0 }, face: false },
-      cam2: { active: false, fps: 0, metrics: { drowsy: 0, stress: 0, confidence: 0 }, face: false },
-      cam3: { active: false, fps: 0, metrics: { drowsy: 0, stress: 0, confidence: 0 }, face: false }
-    })
+    console.log(`${camId} stopped`)
   }, [videoRefs])
+
+  /**
+   * Start all cameras (deprecated - use per-camera start)
+   */
+  const startAllCameras = useCallback(async () => {
+    // Get devices first
+    const devices = await getAvailableDevices()
+
+    if (devices.length === 0) {
+      console.error('No camera devices found')
+      return false
+    }
+
+    // Just get devices, don't auto-start
+    return true
+  }, [getAvailableDevices])
+
+  /**
+   * Stop all cameras
+   */
+  const stopAllCameras = useCallback(() => {
+    Object.keys(cameras).forEach(camId => {
+      if (cameras[camId].active && !cameras[camId].recording) {
+        stopCamera(camId)
+      }
+    })
+  }, [cameras, stopCamera])
+
+  /**
+   * Update camera metrics
+   */
+  const updateCameraMetrics = useCallback((camId: string, metrics: Partial<CameraMetrics>) => {
+    setCameras(prev => ({
+      ...prev,
+      [camId]: {
+        ...prev[camId],
+        metrics: {
+          ...prev[camId].metrics,
+          ...metrics
+        }
+      }
+    }))
+  }, [])
+
+  /**
+   * Update camera face detection
+   */
+  const updateCameraFace = useCallback((camId: string, face: boolean) => {
+    setCameras(prev => ({
+      ...prev,
+      [camId]: {
+        ...prev[camId],
+        face
+      }
+    }))
+  }, [])
+
+  /**
+   * Generate session ID for camera
+   */
+  const generateSessionId = useCallback((camId: string) => {
+    return `${camId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  }, [])
 
   return {
     cameras,
     availableDevices,
-    getAvailableDevices,
-    setSelectedDevice,
-    isDeviceInUse,
-    updateCameraMetrics,
-    updateCameraFace,
-    updateCameraFPS,
-    setCameraActive,
     videoRefs,
     canvasRefs,
     streamsRef,
+    getAvailableDevices,
+    setSelectedDevice,
+    setOperatorName,
+    setRecording,
+    setCalibrated,
+    setTracking,
+    isDeviceInUse,
+    startCamera,
+    stopCamera,
     startAllCameras,
     stopAllCameras,
-    startCamera
+    updateCameraMetrics,
+    updateCameraFace,
+    generateSessionId
   }
 }

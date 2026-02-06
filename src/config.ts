@@ -1,28 +1,60 @@
-// Configuration utility to manage environment variables
-// This centralizes all configuration in one place
+/**
+ * Application Configuration
+ * Centralized config for API endpoints and app settings
+ */
 
 const config = {
-  // Backend URLs
-  wsUrl: import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws',
-  apiUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+  // API Base URL
+  apiUrl: 'http://localhost:8000',
+  
+  // WebSocket URL
+  wsUrl: 'ws://localhost:8000/ws',
+  
+  // API Endpoints
+  endpoints: {
+    // Recording
+    recordStart: '/record/start',
+    recordStop: '/record/stop',
+    recordChunk: '/record/chunk',
+    
+    // Calibration
+    calibrationStart: '/calibration/start',
+    calibrationPoint: '/calibration/point',
+    calibrationSample: '/calibration/sample',
+    calibrationFinish: '/calibration/finish',
+    
+    // Eye Tracking
+    trackingStart: '/tracking/start',
+    trackingStop: '/tracking/stop',
+    
+    // Sessions
+    sessions: '/sessions',
+    gazeData: '/sessions/{session_id}/gaze_data',
+    fatigueEvents: '/sessions/{session_id}/fatigue_events',
+    
+    // Health
+    health: '/health',
+    status: '/status',
+    
+    // Legacy ML
+    ingestFrame: '/ingest/frame'
+  },
   
   // Camera Settings
   camera: {
-    width: parseInt(import.meta.env.VITE_CAMERA_WIDTH as string) || 1920,
-    height: parseInt(import.meta.env.VITE_CAMERA_HEIGHT as string) || 1080,
-    frameSendInterval: parseInt(import.meta.env.VITE_FRAME_SEND_INTERVAL as string) || 250, // Adjusted for 1080p multi-camera
-    maxCameras: parseInt(import.meta.env.VITE_MAX_CAMERAS as string) || 3,
+    defaultFps: 60,
+    trackingFps: 10, // FPS for eye tracking (10 FPS is sufficient)
+    recordingFps: 60, // FPS for video recording
+    defaultWidth: 1920,
+    defaultHeight: 1080
   },
   
-  // Feature Flags
-  features: {
-    enableRecording: import.meta.env.VITE_ENABLE_RECORDING !== 'false',
-    enableLogs: import.meta.env.VITE_ENABLE_LOGS !== 'false',
-  },
-  
-  // Development mode check
-  isDevelopment: import.meta.env.DEV,
-  isProduction: import.meta.env.PROD,
+  // WebSocket Settings
+  ws: {
+    reconnectAttempts: 5,
+    reconnectDelay: 1000, // ms
+    timeout: 60000 // ms
+  }
 }
 
 export default config
