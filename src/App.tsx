@@ -108,7 +108,7 @@ function App() {
     onLog: addLog,
     onGazeData: (cameraId, data) => {
       // Update camera metrics from eye tracking per camera
-      if (data.error && data.error.details.includes('No face detected')) {
+      if (data.error && data.error.includes('No face detected')) {
         updateCameraMetrics(cameraId, {
           drowsy: 0,
           stress: 0,

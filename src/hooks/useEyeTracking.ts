@@ -97,16 +97,16 @@ export function useEyeTracking({ cameras, onLog, onGazeData }: EyeTrackingHookPr
           const message = JSON.parse(event.data)
 
           if (message.type === 'tracking_result' && message.data.error) {
-            console.error(`[EyeTracking] ${cam.cameraId}:`, message.data.error)
+            console.error(`[EyeTracking] ${cam.cameraId}:`, message.data.details)
 
             onLog?.(
-              `${cam.cameraId}: ${message.data.error?? message.data.error}`,
+              `${cam.cameraId}: ${message.data.details ?? message.data.details}`,
               'error'
             )
 
             onGazeData?.(cam.cameraId, { error: message.data.details} as GazeData)
 
-            return // ⛔ stop, jangan lanjut ke result
+            return
           }
 
           if (message.type === 'tracking_result' && message.data) {
