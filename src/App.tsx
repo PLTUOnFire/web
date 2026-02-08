@@ -52,6 +52,7 @@ function App() {
     setSelectedDevice,
     isDeviceInUse,
     updateCameraMetrics,
+    updateCameraFace,
     videoRefs,
     canvasRefs,
     streamsRef,
@@ -107,7 +108,18 @@ function App() {
     onLog: addLog,
     onGazeData: (cameraId, data) => {
       // Update camera metrics from eye tracking per camera
+      if (data.error && data.error.includes('No face detected')) {
+        updateCameraMetrics(cameraId, {
+          drowsy: 0,
+          stress: 0,
+          confidence: 0
+        })
+        updateCameraFace(cameraId, false)
+        return
+      }
+
       if (data.eye_metrics) {
+        updateCameraFace(cameraId, true)
         updateCameraMetrics(cameraId, {
           drowsy: Math.round(data.eye_metrics.perclos * 100),
           stress: data.alert.level === 'critical' ? 100 : data.alert.level === 'danger' ? 75 : 30,

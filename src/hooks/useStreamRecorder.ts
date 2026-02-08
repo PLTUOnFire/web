@@ -62,6 +62,7 @@ export function useStreamRecorder({ onLog }: StreamRecorderProps) {
   ): Promise<WebSocket | null> => {
     return new Promise((resolve) => {
       try {
+      
         cleanupWebSocket(cameraId)
 
         let baseUrl = config.wsUrl
@@ -206,6 +207,10 @@ export function useStreamRecorder({ onLog }: StreamRecorderProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          calpoints: 9,
+          config_type: "dual_balanced",
+          mode: "iris",
+          enable_operator_lock: true,
           session_id: actualSessionId,
           camera_id: cameraId,
           operator_name: operatorName,

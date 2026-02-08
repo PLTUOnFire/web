@@ -7,6 +7,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import config from '../config'
 
 export interface GazeData {
+  error?: any
   gaze: {
     x: number
     y: number
@@ -94,6 +95,19 @@ export function useEyeTracking({ cameras, onLog, onGazeData }: EyeTrackingHookPr
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data)
+
+          if (message.type === 'tracking_result' && message.data.error) {
+            console.error(`[EyeTracking] ${cam.cameraId}:`, message.data.error)
+
+            onLog?.(
+              `${cam.cameraId}: ${message.data.error?? message.data.error}`,
+              'error'
+            )
+
+            onGazeData?.(cam.cameraId, { error: message.data.details} as GazeData)
+
+            return // ⛔ stop, jangan lanjut ke result
+          }
 
           if (message.type === 'tracking_result' && message.data) {
             const gazeData: GazeData = message.data
