@@ -70,13 +70,12 @@ function App() {
     onLog: addLog
   })
 
-  // Calibration hook
+  // Calibration hook - all 3 cameras
   const {
     isCalibrating,
     currentStep,
     totalSteps,
     currentPoint,
-    calibrationType,
     calibrationComplete,
     calibrationAccuracy,
     startCalibration,
@@ -84,26 +83,32 @@ function App() {
     nextCalibrationPoint,
     cancelCalibration
   } = useCalibration({
-    sessionId: cameraSessionIds.cam1 || sessionIdRef.current,
-    cameraId: 'cam1',
+    cameras: [
+      { cameraId: 'cam1', sessionId: cameraSessionIds.cam1, videoRef: videoRefs.cam1 },
+      { cameraId: 'cam2', sessionId: cameraSessionIds.cam2, videoRef: videoRefs.cam2 },
+      { cameraId: 'cam3', sessionId: cameraSessionIds.cam3, videoRef: videoRefs.cam3 }
+    ],
     onLog: addLog
   })
 
-  // Eye Tracking hook
+  // Eye Tracking hook - all 3 cameras
   const {
     isTracking,
-    latestGazeData,
-    alertLevel,
+    gazeDataMap,
+    worstAlertLevel,
     startTracking,
     stopTracking
   } = useEyeTracking({
-    sessionId: cameraSessionIds.cam1 || sessionIdRef.current,
-    cameraId: 'cam1',
+    cameras: [
+      { cameraId: 'cam1', sessionId: cameraSessionIds.cam1, videoRef: videoRefs.cam1 },
+      { cameraId: 'cam2', sessionId: cameraSessionIds.cam2, videoRef: videoRefs.cam2 },
+      { cameraId: 'cam3', sessionId: cameraSessionIds.cam3, videoRef: videoRefs.cam3 }
+    ],
     onLog: addLog,
-    onGazeData: (data) => {
-      // Update camera metrics from eye tracking
+    onGazeData: (cameraId, data) => {
+      // Update camera metrics from eye tracking per camera
       if (data.eye_metrics) {
-        updateCameraMetrics('cam1', {
+        updateCameraMetrics(cameraId, {
           drowsy: Math.round(data.eye_metrics.perclos * 100),
           stress: data.alert.level === 'critical' ? 100 : data.alert.level === 'danger' ? 75 : 30,
           confidence: Math.round((1 - data.eye_metrics.ear) * 100)
@@ -136,34 +141,53 @@ function App() {
     addLog(`${camId} stopped`, 'info')
   }
 
-  // Start calibration
+  // Start calibration (requires recording to be started first - backend needs CameraSession from /record/start)
   const handleStartCalibration = async () => {
-    // Check if camera is active
-    if (!cameras.cam1.active) {
-      addLog('Please start camera first', 'warning')
+    // Check if at least one camera is active
+    const hasActiveCamera = cameras.cam1.active || cameras.cam2.active || cameras.cam3.active
+    if (!hasActiveCamera) {
+      addLog('Please start at least one camera first', 'warning')
       return
     }
 
-    const success = await startCalibration('multipose')
+    // Check if recording is active (backend requires /record/start before /calibration/start)
+    if (!isRecording) {
+      addLog('Please start recording first. Backend requires an active recording session before calibration.', 'warning')
+      return
+    }
+
+    // Check which cameras have session IDs (from /record/start)
+    const camerasWithSession = ['cam1', 'cam2', 'cam3'].filter(
+      camId => cameras[camId as keyof typeof cameras].active && cameraSessionIds[camId]
+    )
+
+    if (camerasWithSession.length === 0) {
+      addLog('No cameras have active recording sessions. Start recording first.', 'warning')
+      return
+    }
+
+    addLog(`Starting calibration for cameras: ${camerasWithSession.join(', ')}`, 'info')
+
+    const success = await startCalibration()
     if (success) {
       addLog('Calibration started - follow on-screen instructions', 'info')
     }
   }
 
-  // Start eye tracking
+  // Start eye tracking for all active cameras
   const handleStartEyeTracking = () => {
     if (!calibrationComplete) {
       addLog('Please complete calibration first', 'warning')
       return
     }
 
-    const videoElement = videoRefs.cam1?.current
-    if (!videoElement) {
-      addLog('Camera not available', 'error')
+    const hasActiveCamera = cameras.cam1.active || cameras.cam2.active || cameras.cam3.active
+    if (!hasActiveCamera) {
+      addLog('No active cameras available', 'error')
       return
     }
 
-    startTracking(videoElement)
+    startTracking()
   }
 
   // Stop eye tracking
@@ -280,16 +304,16 @@ function App() {
   return (
     <div className="app">
       {/* Calibration Screen (Full-screen overlay) */}
-      {isCalibrating && currentPoint && videoRefs.cam1?.current && (
+      {isCalibrating && currentPoint && (cameras.cam1.active || cameras.cam2.active || cameras.cam3.active) && (
         <CalibrationScreen
           currentPoint={currentPoint}
           currentStep={currentStep}
           totalSteps={totalSteps}
-          videoElement={videoRefs.cam1.current}
+          hasActiveCamera={cameras.cam1.active || cameras.cam2.active || cameras.cam3.active}
           onCaptureSample={captureCalibrationSample}
           onNext={nextCalibrationPoint}
           onCancel={cancelCalibration}
-          calibrationType={calibrationType}
+          calibrationType="multipose"
         />
       )}
 
@@ -310,11 +334,11 @@ function App() {
         {/* Eye Tracking Panel */}
         {(calibrationComplete || isTracking) && (
           <EyeTrackingPanel
-            gazeData={latestGazeData}
+            gazeDataMap={gazeDataMap}
             isTracking={isTracking}
             isCalibrated={calibrationComplete}
             calibrationAccuracy={calibrationAccuracy}
-            alertLevel={alertLevel}
+            alertLevel={worstAlertLevel}
           />
         )}
         

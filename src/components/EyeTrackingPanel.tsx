@@ -1,75 +1,120 @@
 /**
  * Eye Tracking Panel Component
- * Displays real-time gaze data and fatigue metrics
+ * Displays real-time gaze data and fatigue metrics per camera
  */
 
+import type { GazeData } from '../hooks/useEyeTracking'
 import './EyeTrackingPanel.css'
 
-interface GazeData {
-  gaze: {
-    x: number
-    y: number
-    raw_x: number
-    raw_y: number
-  }
-  head_pose: {
-    pitch: number
-    yaw: number
-    roll: number
-  }
-  eye_metrics: {
-    ear: number
-    perclos: number
-    blink_rate: number
-    is_closed: boolean
-  }
-  fixation: {
-    duration: number
-    saccade: number
-    area: string | null
-  }
-  alert: {
-    level: string
-    status_text: string
-    is_nodding: boolean
-    nod_duration: number
-  }
-  distance_m: number
-}
-
 interface EyeTrackingPanelProps {
-  gazeData: GazeData | null
+  gazeDataMap: Record<string, GazeData>
   isTracking: boolean
   isCalibrated: boolean
   calibrationAccuracy: number
   alertLevel: 'normal' | 'warning' | 'danger' | 'critical'
 }
 
+const ALERT_COLORS: Record<string, string> = {
+  critical: '#ff3366',
+  danger: '#ff6b35',
+  warning: '#ffaa00',
+  normal: '#00ff88'
+}
+
+const ALERT_ICONS: Record<string, string> = {
+  critical: '🚨',
+  danger: '⚠️',
+  warning: '⚡',
+  normal: '✓'
+}
+
+function CameraGazeCard({ cameraId, data }: { cameraId: string; data: GazeData }) {
+  const alertColor = ALERT_COLORS[data.alert.level] || ALERT_COLORS.normal
+  const alertIcon = ALERT_ICONS[data.alert.level] || ALERT_ICONS.normal
+  const camLabel = cameraId.replace('cam', 'CAM-0')
+
+  return (
+    <div className="camera-gaze-card">
+      <div className="camera-gaze-header">
+        <span className="camera-gaze-label">{camLabel}</span>
+        <span
+          className="camera-gaze-alert-badge"
+          style={{ background: `${alertColor}25`, color: alertColor, borderColor: alertColor }}
+        >
+          {alertIcon} {data.alert.level.toUpperCase()}
+        </span>
+      </div>
+
+      <div className="camera-gaze-grid">
+        {/* Gaze */}
+        <div className="gaze-metric">
+          <div className="gaze-metric-label">Gaze</div>
+          <div className="gaze-metric-value">
+            X: {data.gaze.x}px, Y: {data.gaze.y}px
+          </div>
+        </div>
+
+        {/* Head Pose */}
+        <div className="gaze-metric">
+          <div className="gaze-metric-label">Head Pose</div>
+          <div className="gaze-metric-value">
+            P: {data.head_pose.pitch.toFixed(1)}° Y: {data.head_pose.yaw.toFixed(1)}° R: {data.head_pose.roll.toFixed(1)}°
+          </div>
+        </div>
+
+        {/* Eye Metrics */}
+        <div className="gaze-metric">
+          <div className="gaze-metric-label">EAR / PERCLOS</div>
+          <div className="gaze-metric-value">
+            {data.eye_metrics.ear.toFixed(3)} / {(data.eye_metrics.perclos * 100).toFixed(1)}%
+          </div>
+        </div>
+
+        {/* Blink */}
+        <div className="gaze-metric">
+          <div className="gaze-metric-label">Blink Rate</div>
+          <div className="gaze-metric-value">
+            {data.eye_metrics.blink_rate} /min {data.eye_metrics.is_closed ? '(Closed)' : ''}
+          </div>
+        </div>
+
+        {/* Fixation */}
+        <div className="gaze-metric">
+          <div className="gaze-metric-label">Fixation</div>
+          <div className="gaze-metric-value">
+            {data.fixation.duration.toFixed(2)}s | {data.fixation.area || 'none'}
+          </div>
+        </div>
+
+        {/* Distance */}
+        <div className="gaze-metric">
+          <div className="gaze-metric-label">Distance</div>
+          <div className="gaze-metric-value">
+            {(data.distance_m * 100).toFixed(1)} cm
+          </div>
+        </div>
+      </div>
+
+      {/* Alert Status */}
+      <div className="camera-gaze-status" style={{ borderColor: alertColor, background: `${alertColor}10` }}>
+        <span style={{ color: alertColor, fontWeight: 700 }}>{data.alert.status_text}</span>
+        {data.alert.is_nodding && (
+          <span className="nodding-badge">Nodding: {data.alert.nod_duration.toFixed(1)}s</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function EyeTrackingPanel({
-  gazeData,
+  gazeDataMap,
   isTracking,
   isCalibrated,
   calibrationAccuracy,
   alertLevel
 }: EyeTrackingPanelProps) {
-  
-  const getAlertColor = () => {
-    switch (alertLevel) {
-      case 'critical': return '#ff3366'
-      case 'danger': return '#ff6b35'
-      case 'warning': return '#ffaa00'
-      default: return '#00ff88'
-    }
-  }
-
-  const getAlertIcon = () => {
-    switch (alertLevel) {
-      case 'critical': return '🚨'
-      case 'danger': return '⚠️'
-      case 'warning': return '⚡'
-      default: return '✓'
-    }
-  }
+  const cameraEntries = Object.entries(gazeDataMap)
+  const hasData = cameraEntries.length > 0
 
   return (
     <div className="eye-tracking-panel">
@@ -86,125 +131,32 @@ function EyeTrackingPanel({
               Tracking Active
             </span>
           )}
-        </div>
-      </div>
-
-      <div className="panel-grid">
-        {/* Gaze Position */}
-        <div className="metric-box">
-          <div className="metric-label">Gaze Position</div>
-          {gazeData ? (
-            <div className="metric-value-large">
-              X: {gazeData.gaze.x}px, Y: {gazeData.gaze.y}px
-            </div>
-          ) : (
-            <div className="metric-value-dim">No data</div>
-          )}
-        </div>
-
-        {/* Head Pose */}
-        <div className="metric-box">
-          <div className="metric-label">Head Pose</div>
-          {gazeData ? (
-            <div className="metric-grid-small">
-              <div>
-                <span className="metric-sub-label">Pitch:</span> {gazeData.head_pose.pitch.toFixed(1)}°
-              </div>
-              <div>
-                <span className="metric-sub-label">Yaw:</span> {gazeData.head_pose.yaw.toFixed(1)}°
-              </div>
-              <div>
-                <span className="metric-sub-label">Roll:</span> {gazeData.head_pose.roll.toFixed(1)}°
-              </div>
-            </div>
-          ) : (
-            <div className="metric-value-dim">No data</div>
-          )}
-        </div>
-
-        {/* Eye Metrics */}
-        <div className="metric-box">
-          <div className="metric-label">Eye Metrics</div>
-          {gazeData ? (
-            <div className="metric-grid-small">
-              <div>
-                <span className="metric-sub-label">EAR:</span> {gazeData.eye_metrics.ear.toFixed(3)}
-              </div>
-              <div>
-                <span className="metric-sub-label">PERCLOS:</span> {(gazeData.eye_metrics.perclos * 100).toFixed(1)}%
-              </div>
-              <div>
-                <span className="metric-sub-label">Blinks:</span> {gazeData.eye_metrics.blink_rate} /min
-              </div>
-            </div>
-          ) : (
-            <div className="metric-value-dim">No data</div>
-          )}
-        </div>
-
-        {/* Fixation */}
-        <div className="metric-box">
-          <div className="metric-label">Fixation Analysis</div>
-          {gazeData ? (
-            <div className="metric-grid-small">
-              <div>
-                <span className="metric-sub-label">Duration:</span> {gazeData.fixation.duration.toFixed(2)}s
-              </div>
-              <div>
-                <span className="metric-sub-label">Saccade:</span> {gazeData.fixation.saccade.toFixed(1)}px
-              </div>
-              <div>
-                <span className="metric-sub-label">Area:</span> {gazeData.fixation.area || 'none'}
-              </div>
-            </div>
-          ) : (
-            <div className="metric-value-dim">No data</div>
-          )}
-        </div>
-
-        {/* Alert Status */}
-        <div 
-          className="metric-box alert-box" 
-          style={{ 
-            borderColor: getAlertColor(),
-            background: `${getAlertColor()}15`
-          }}
-        >
-          <div className="metric-label">Alert Status</div>
-          {gazeData ? (
-            <div className="alert-content">
-              <div className="alert-icon" style={{ fontSize: '2rem' }}>
-                {getAlertIcon()}
-              </div>
-              <div className="alert-level" style={{ color: getAlertColor() }}>
-                {alertLevel.toUpperCase()}
-              </div>
-              <div className="alert-text">
-                {gazeData.alert.status_text}
-              </div>
-              {gazeData.alert.is_nodding && (
-                <div className="alert-detail">
-                  Nodding: {gazeData.alert.nod_duration.toFixed(1)}s
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="metric-value-dim">No data</div>
-          )}
-        </div>
-
-        {/* Distance */}
-        <div className="metric-box">
-          <div className="metric-label">Distance</div>
-          {gazeData ? (
-            <div className="metric-value-large">
-              {(gazeData.distance_m * 100).toFixed(1)} cm
-            </div>
-          ) : (
-            <div className="metric-value-dim">No data</div>
+          {isTracking && hasData && (
+            <span
+              className="badge"
+              style={{
+                background: `${ALERT_COLORS[alertLevel]}25`,
+                color: ALERT_COLORS[alertLevel],
+                border: `1px solid ${ALERT_COLORS[alertLevel]}`
+              }}
+            >
+              {ALERT_ICONS[alertLevel]} {alertLevel.toUpperCase()}
+            </span>
           )}
         </div>
       </div>
+
+      {hasData ? (
+        <div className="camera-gaze-cards">
+          {cameraEntries.map(([cameraId, data]) => (
+            <CameraGazeCard key={cameraId} cameraId={cameraId} data={data} />
+          ))}
+        </div>
+      ) : (
+        <div className="panel-no-data">
+          {isTracking ? 'Waiting for tracking data...' : 'Start eye tracking to see real-time data'}
+        </div>
+      )}
     </div>
   )
 }

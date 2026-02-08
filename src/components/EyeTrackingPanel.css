@@ -31,94 +31,15 @@
 .panel-status {
   display: flex;
   gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
-.panel-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px;
-}
-
-/* Metric Box */
-.metric-box {
-  background: rgba(255, 255, 255, 0.03);
-  border: 2px solid var(--border-color);
-  border-radius: 12px;
-  padding: 16px;
-  transition: all 0.3s ease;
-}
-
-.metric-box:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: var(--accent-primary);
-  transform: translateY(-2px);
-}
-
-.metric-label {
-  font-size: 0.85rem;
-  color: var(--text-mid);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 12px;
-  font-weight: 600;
-}
-
-.metric-value-large {
-  font-size: 1.3rem;
-  font-weight: 700;
-  color: var(--text-bright);
-  font-family: 'Courier New', monospace;
-}
-
-.metric-value-dim {
-  font-size: 1rem;
-  color: var(--text-dim);
-  font-style: italic;
-}
-
-.metric-grid-small {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 0.95rem;
-  color: var(--text-mid);
-}
-
-.metric-sub-label {
-  color: var(--text-dim);
-  font-weight: 600;
-  margin-right: 6px;
-}
-
-/* Alert Box */
-.alert-box {
-  grid-column: span 2;
-}
-
-.alert-content {
+.panel-no-data {
   text-align: center;
-}
-
-.alert-icon {
-  margin-bottom: 8px;
-}
-
-.alert-level {
-  font-size: 1.5rem;
-  font-weight: 700;
-  margin-bottom: 8px;
-  letter-spacing: 2px;
-}
-
-.alert-text {
-  font-size: 1rem;
-  color: var(--text-mid);
-  margin-bottom: 6px;
-}
-
-.alert-detail {
-  font-size: 0.85rem;
+  padding: 30px;
   color: var(--text-dim);
+  font-size: 1rem;
   font-style: italic;
 }
 
@@ -144,18 +65,115 @@
   border: 1px solid var(--accent-info);
 }
 
-/* Responsive */
-@media (max-width: 1200px) {
-  .alert-box {
-    grid-column: span 1;
-  }
+/* ============================================================================
+   PER-CAMERA GAZE CARDS
+   ============================================================================ */
+.camera-gaze-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
 }
 
+.camera-gaze-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 2px solid var(--border-color);
+  border-radius: 12px;
+  padding: 16px;
+  transition: all 0.3s ease;
+}
+
+.camera-gaze-card:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--accent-primary);
+  transform: translateY(-2px);
+}
+
+.camera-gaze-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.camera-gaze-label {
+  font-family: 'Orbitron', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--accent-info);
+  letter-spacing: 1px;
+}
+
+.camera-gaze-alert-badge {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid;
+}
+
+.camera-gaze-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.gaze-metric {
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+}
+
+.gaze-metric-label {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.gaze-metric-value {
+  font-size: 0.85rem;
+  color: var(--text-bright);
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+}
+
+.camera-gaze-status {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid;
+  font-size: 0.85rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.nodding-badge {
+  font-size: 0.75rem;
+  color: var(--accent-danger);
+  font-weight: 600;
+  padding: 2px 8px;
+  background: rgba(255, 51, 102, 0.15);
+  border-radius: 4px;
+}
+
+/* Responsive */
 @media (max-width: 768px) {
-  .panel-grid {
+  .camera-gaze-cards {
     grid-template-columns: 1fr;
   }
-  
+
+  .camera-gaze-grid {
+    grid-template-columns: 1fr;
+  }
+
   .panel-header {
     flex-direction: column;
     gap: 12px;
