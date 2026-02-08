@@ -1,236 +1,365 @@
-import MetricCard from './MetricCard'
-import './CameraPanel.css'
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import Header from './components/Header'
+import CameraGrid from './components/CameraGrid'
+import ControlPanel from './components/ControlPanel'
+import LogsPanel from './components/LogsPanel'
+import CalibrationScreen from './components/CalibrationScreen'
+import EyeTrackingPanel from './components/EyeTrackingPanel'
+import { useCamera } from './hooks/useCamera'
+import { useStreamRecorder } from './hooks/useStreamRecorder'
+import { useCalibration } from './hooks/useCalibration'
+import { useEyeTracking } from './hooks/useEyeTracking'
+import './App.css'
 
-interface CameraMetrics {
-  drowsy: number
-  stress: number
-  confidence: number
+interface Log {
+  id: string
+  timestamp: string
+  message: string
+  type: 'info' | 'success' | 'warning' | 'error'
 }
 
-interface CameraDevice {
-  deviceId: string
-  label: string
-}
+function App() {
+  const [logs, setLogs] = useState<Log[]>([])
+  const [operatorName, setOperatorName] = useState('Operator-1')
+  const [showNameInput, setShowNameInput] = useState(false)
+  const [cameraSessionIds, setCameraSessionIds] = useState<Record<string, string>>({
+    cam1: '',
+    cam2: '',
+    cam3: ''
+  })
+  const logIdRef = useRef(0)
+  const sessionIdRef = useRef(`${Date.now()}-${Math.random()}`)
+  const initializedRef = useRef(false)
 
-interface Camera {
-  active: boolean
-  fps: number
-  metrics: CameraMetrics
-  face: boolean
-  selectedDeviceId?: string
-}
+  // Add log entry
+  const addLog = (message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
+    const timestamp = new Date().toLocaleTimeString()
+    logIdRef.current += 1
+    const uniqueId = `${sessionIdRef.current}-${logIdRef.current}`
+    setLogs(prev => [{
+      id: uniqueId,
+      timestamp,
+      message,
+      type
+    }, ...prev].slice(0, 50))
+  }
 
-interface CameraPanelProps {
-  camId: string
-  camera: Camera
-  videoRef: React.RefObject<HTMLVideoElement>
-  canvasRef: React.RefObject<HTMLCanvasElement>
-  index: number
-  availableDevices: CameraDevice[]
-  onDeviceChange: (deviceId: string) => void
-  onStartCamera: (deviceId?: string) => Promise<void>
-  onStopCamera?: (camId: string) => Promise<void>
-  isDeviceInUse?: (deviceId: string) => string | null
-  isRecording?: boolean
-}
+  // Camera hook
+  const {
+    cameras,
+    availableDevices,
+    getAvailableDevices,
+    setSelectedDevice,
+    setOperatorName: setCameraOperatorName,
+    isDeviceInUse,
+    updateCameraMetrics,
+    videoRefs,
+    canvasRefs,
+    streamsRef,
+    startAllCameras,
+    stopAllCameras,
+    startCamera,
+    stopCamera
+  } = useCamera()
 
-function CameraPanel({ 
-  camId, 
-  camera, 
-  videoRef, 
-  canvasRef, 
-  index,
-  availableDevices,
-  onDeviceChange,
-  onStartCamera,
-  onStopCamera,
-  isDeviceInUse,
-  isRecording
-}: CameraPanelProps) {
-  const camNumber = String(index + 1).padStart(2, '0')
-  const [isStarting, setIsStarting] = useState(false)
+  // Stream Recorder hook
+  const {
+    isRecording,
+    startRecording,
+    stopRecording
+  } = useStreamRecorder({
+    onLog: addLog
+  })
 
-  const handleDeviceChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const deviceId = e.target.value
-    onDeviceChange(deviceId)
-    if (camera.active && !isRecording) {
-      await onStartCamera(deviceId)
+  // Calibration hook
+  const {
+    isCalibrating,
+    currentStep,
+    totalSteps,
+    currentPoint,
+    calibrationType,
+    calibrationComplete,
+    calibrationAccuracy,
+    startCalibration,
+    captureCalibrationSample,
+    nextCalibrationPoint,
+    cancelCalibration
+  } = useCalibration({
+    sessionId: cameraSessionIds.cam1 || sessionIdRef.current,
+    cameraId: 'cam1',
+    onLog: addLog
+  })
+
+  // Eye Tracking hook
+  const {
+    isTracking,
+    latestGazeData,
+    alertLevel,
+    startTracking,
+    stopTracking
+  } = useEyeTracking({
+    sessionId: cameraSessionIds.cam1 || sessionIdRef.current,
+    cameraId: 'cam1',
+    onLog: addLog,
+    onGazeData: (data) => {
+      // Safe null check for data
+      if (data && data.eye_metrics && data.alert) {
+        updateCameraMetrics('cam1', {
+          drowsy: Math.round(data.eye_metrics.perclos * 100),
+          stress: data.alert.level === 'critical' ? 100 : data.alert.level === 'danger' ? 75 : 30,
+          confidence: Math.round((1 - data.eye_metrics.ear) * 100)
+        })
+      }
+    }
+  })
+
+  // Start cameras
+  const handleStartCameras = async () => {
+    addLog('Initializing camera access...', 'info')
+    const success = await startAllCameras()
+    if (success) {
+      addLog('All cameras started successfully', 'success')
     }
   }
 
-  const handleStartCamera = async () => {
-    setIsStarting(true)
-    try {
-      // Start with selected device or auto-select first available
-      await onStartCamera(camera.selectedDeviceId)
-    } finally {
-      setIsStarting(false)
+  // Stop cameras
+  const handleStopCameras = () => {
+    stopAllCameras()
+    if (isTracking) {
+      stopTracking()
+    }
+    addLog('All cameras stopped', 'info')
+  }
+
+  // Stop a single camera
+  const handleStopCamera = async (camId: string) => {
+    await stopCamera(camId)
+    addLog(`${camId} stopped`, 'info')
+  }
+
+  // Handle operator name change per camera
+  const handleOperatorNameChange = (camId: string, name: string) => {
+    setCameraOperatorName(camId, name)
+    addLog(`${camId}: Operator name changed to "${name}"`, 'info')
+  }
+
+  // Start calibration
+  const handleStartCalibration = async () => {
+    // Check if camera is active
+    if (!cameras.cam1.active) {
+      addLog('Please start camera first', 'warning')
+      return
+    }
+
+    const success = await startCalibration('multipose')
+    if (success) {
+      addLog('Calibration started - follow on-screen instructions', 'info')
     }
   }
 
-  const handleStopCamera = async () => {
-    if (onStopCamera) {
-      await onStopCamera(camId)
+  // Start eye tracking
+  const handleStartEyeTracking = () => {
+    if (!calibrationComplete) {
+      addLog('Please complete calibration first', 'warning')
+      return
     }
+
+    const videoElement = videoRefs.cam1?.current
+    if (!videoElement) {
+      addLog('Camera not available', 'error')
+      return
+    }
+
+    startTracking(videoElement)
+  }
+
+  // Stop eye tracking
+  const handleStopEyeTracking = () => {
+    stopTracking()
+  }
+
+  // Handle recording toggle
+  const handleToggleRecording = async () => {
+    if (isRecording) {
+      // Stop all active camera recordings
+      const activeRecorders = ['cam1', 'cam2', 'cam3'].filter(camId => 
+        cameras[camId as 'cam1' | 'cam2' | 'cam3'].active
+      )
+      
+      let succeeded = true
+      for (const camId of activeRecorders) {
+        const success = await stopRecording(camId)
+        if (!success) succeeded = false
+      }
+      
+      if (succeeded) {
+        addLog('All camera recordings stopped', 'success')
+      }
+    } else {
+      // Start recording for all active cameras
+      const activeCameras = ['cam1', 'cam2', 'cam3'].filter(camId =>
+        cameras[camId as 'cam1' | 'cam2' | 'cam3'].active
+      )
+      
+      if (activeCameras.length === 0) {
+        addLog('No active cameras to record', 'warning')
+        return
+      }
+
+      addLog(`Starting recording for ${activeCameras.length} camera(s)...`, 'info')
+      
+      let successCount = 0
+      const newSessionIds = { ...cameraSessionIds }
+      
+      for (const camId of activeCameras) {
+        const stream = streamsRef.current[camId as 'cam1' | 'cam2' | 'cam3']
+        if (!stream) {
+          addLog(`${camId}: No stream available`, 'warning')
+          continue
+        }
+        
+        // Use operator name from camera state
+        const cameraData = cameras[camId as 'cam1' | 'cam2' | 'cam3']
+        const cameraOperatorName = cameraData.operatorName || `Operator-${camId.replace('cam', '')}`
+        
+        const result = await startRecording(
+          camId,
+          stream,
+          cameraOperatorName,  // Use per-camera operator name
+          60
+        )
+        
+        if (result.success && result.sessionId) {
+          successCount++
+          newSessionIds[camId as 'cam1' | 'cam2' | 'cam3'] = result.sessionId
+          addLog(`${camId} (${cameraOperatorName}): Session ID ${result.sessionId.slice(0, 12)}...`, 'info')
+        }
+      }
+      
+      setCameraSessionIds(newSessionIds)
+      
+      if (successCount === 0) {
+        addLog('Failed to start any camera recording', 'error')
+      } else {
+        addLog(`Recording started for ${successCount} camera(s)`, 'success')
+      }
+    }
+  }
+
+  // Handle device change
+  const handleDeviceChange = async (camId: string, deviceId: string) => {
+    if (isRecording) {
+      addLog('Cannot change devices while recording', 'warning')
+      return
+    }
+    
+    setSelectedDevice(camId, deviceId)
+    
+    if (cameras[camId as keyof typeof cameras].active) {
+      addLog(`Switching ${camId} to new device...`, 'info')
+      await startCamera(camId, deviceId)
+    }
+  }
+
+  // Initialize
+  useEffect(() => {
+    if (!initializedRef.current) {
+      initializedRef.current = true
+      addLog('PLTU Eye Tracking System v4.0 initialized', 'success')
+      addLog('Multi-operator: Each camera has independent operator name', 'info')
+      
+      getAvailableDevices().then(devices => {
+        if (devices.length > 0) {
+          addLog(`Found ${devices.length} camera device(s)`, 'info')
+        } else {
+          addLog('No camera devices found!', 'warning')
+        }
+      })
+    }
+  }, [])
+
+  const systemActive = Object.values(cameras).some(cam => cam.active)
+
+  const handleStartCamera = async (camId: string, deviceId?: string) => {
+    if (isRecording) {
+      addLog('Cannot start individual camera while recording', 'warning')
+      return
+    }
+    await startCamera(camId, deviceId)
   }
 
   return (
-    <div 
-      className="camera-panel" 
-      style={{ 
-        animationDelay: `${index * 0.1}s`,
-        borderColor: isRecording && camera.active ? '#ff3366' : undefined
-      }}
-    >
-      {/* Header */}
-      <div className="camera-header">
-        <div className="camera-id">
-          CAM-{camNumber}
-          {isRecording && camera.active && (
-            <span style={{ 
-              marginLeft: '10px', 
-              fontSize: '0.8rem',
-              color: '#ff3366',
-              animation: 'pulse 1.5s ease-in-out infinite'
-            }}>
-              ● REC
-            </span>
-          )}
-        </div>
-        <div className="camera-status">
-          <span className="badge info">{camera.fps} FPS</span>
-          <span className={`badge ${camera.face ? 'success' : 'danger'}`}>
-            {camera.face ? 'FACE ✓' : 'NO FACE'}
-          </span>
-        </div>
-      </div>
-
-      {/* Device Selector */}
-      <div className="device-selector">
-        <select 
-          value={camera.selectedDeviceId || ''} 
-          onChange={handleDeviceChange}
-          className="device-select"
-          disabled={isRecording || camera.active}
-          title={isRecording ? 'Cannot change device while recording' : camera.active ? 'Camera is active' : undefined}
-        >
-          <option value="">Select Camera Device</option>
-          {availableDevices.map(device => {
-            const inUse = isDeviceInUse?.(device.deviceId)
-            const disabled = inUse !== null && inUse !== camId
-            return (
-              <option 
-                key={device.deviceId} 
-                value={device.deviceId}
-                disabled={disabled}
-              >
-                {device.label} {disabled ? `(Used by ${inUse})` : ''}
-              </option>
-            )
-          })}
-        </select>
-        
-        {/* Start/Stop Button */}
-        <button
-          onClick={camera.active ? handleStopCamera : handleStartCamera}
-          disabled={isRecording || isStarting}
-          className={`camera-control-btn ${camera.active ? 'stop' : 'start'}`}
-          title={camera.active ? 'Stop camera' : 'Start camera'}
-        >
-          {isStarting ? (
-            <>
-              <span className="spinner-mini"></span>
-              {' Starting...'}
-            </>
-          ) : camera.active ? (
-            <>
-              ⏹️ {' Stop'}
-            </>
-          ) : (
-            <>
-              ▶️ {' Start Camera'}
-            </>
-          )}
-        </button>
-        
-        {isRecording && (
-          <div style={{ 
-            fontSize: '0.7rem', 
-            color: 'var(--text-dim)', 
-            marginTop: '5px',
-            textAlign: 'center'
-          }}>
-            🔒 Locked while recording
-          </div>
-        )}
-      </div>
-
-      {/* Video Display */}
-      <div className="video-wrapper">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
+    <div className="app">
+      {/* Calibration Screen (Full-screen overlay) */}
+      {isCalibrating && currentPoint && videoRefs.cam1?.current && (
+        <CalibrationScreen
+          currentPoint={currentPoint}
+          currentStep={currentStep}
+          totalSteps={totalSteps}
+          videoElement={videoRefs.cam1.current}
+          onCaptureSample={captureCalibrationSample}
+          onNext={nextCalibrationPoint}
+          onCancel={cancelCalibration}
+          calibrationType={calibrationType}
         />
-        <canvas ref={canvasRef} />
-        {!camera.active && (
-          <div className="video-placeholder">
-            <div className="video-placeholder-icon">📹</div>
-            <div className="video-placeholder-text">Camera Inactive</div>
-          </div>
-        )}
-        {isRecording && camera.active && (
-          <div style={{
-            position: 'absolute',
-            top: '10px',
-            right: '10px',
-            background: 'rgba(255, 51, 102, 0.9)',
-            color: 'white',
-            padding: '6px 12px',
-            borderRadius: '4px',
-            fontSize: '0.75rem',
-            fontWeight: 700,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            animation: 'pulse 1.5s ease-in-out infinite'
-          }}>
-            <div style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              background: 'white',
-              animation: 'pulse 1s ease-in-out infinite'
-            }} />
-            60 FPS RECORDING
-          </div>
-        )}
-      </div>
+      )}
 
-      {/* Metrics */}
-      <div className="metrics-panel">
-        <div className="metrics-grid">
-          <MetricCard
-            label="Drowsiness"
-            value={camera.metrics.drowsy}
-            type="drowsy"
+      <div className="container">
+        <Header 
+          systemActive={systemActive}
+          deviceCount={availableDevices.length}
+          isRecording={isRecording}
+          operatorName={operatorName}
+          onOperatorNameChange={(name) => {
+            setOperatorName(name)
+            setShowNameInput(false)
+          }}
+          showNameInput={showNameInput}
+          onShowNameInput={() => setShowNameInput(!showNameInput)}
+        />
+        
+        {/* Eye Tracking Panel */}
+        {(calibrationComplete || isTracking) && (
+          <EyeTrackingPanel
+            gazeData={latestGazeData}
+            isTracking={isTracking}
+            isCalibrated={calibrationComplete}
+            calibrationAccuracy={calibrationAccuracy}
+            alertLevel={alertLevel}
           />
-          <MetricCard
-            label="Stress"
-            value={camera.metrics.stress}
-            type="stress"
-          />
-          <MetricCard
-            label="Confidence"
-            value={camera.metrics.confidence}
-            type="face"
-          />
-        </div>
+        )}
+        
+        <CameraGrid 
+          cameras={cameras}
+          availableDevices={availableDevices}
+          videoRefs={videoRefs as Record<string, React.RefObject<HTMLVideoElement>>}
+          canvasRefs={canvasRefs as Record<string, React.RefObject<HTMLCanvasElement>>}
+          onDeviceChange={handleDeviceChange}
+          onStartCamera={handleStartCamera}
+          onStopCamera={handleStopCamera}
+          onOperatorNameChange={handleOperatorNameChange}
+          isDeviceInUse={isDeviceInUse}
+          isRecording={isRecording}
+        />
+        
+        <ControlPanel
+          recording={isRecording}
+          systemActive={systemActive}
+          isCalibrating={isCalibrating}
+          calibrationComplete={calibrationComplete}
+          isTracking={isTracking}
+          onStartCameras={handleStartCameras}
+          onStopCameras={handleStopCameras}
+          onToggleRecording={handleToggleRecording}
+          onStartCalibration={handleStartCalibration}
+          onStartTracking={handleStartEyeTracking}
+          onStopTracking={handleStopEyeTracking}
+        />
+        
+        <LogsPanel logs={logs} />
       </div>
     </div>
   )
 }
 
-export default CameraPanel
+export default App

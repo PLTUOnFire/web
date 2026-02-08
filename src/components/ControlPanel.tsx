@@ -20,7 +20,7 @@ function ControlPanel({
   isCalibrating,
   calibrationComplete,
   isTracking,
-  onStartCameras,
+
   onStopCameras,
   onToggleRecording,
   onStartCalibration,
@@ -31,13 +31,6 @@ function ControlPanel({
     <div className="control-panel">
       <div className="control-header">System Controls</div>
       <div className="control-grid">
-        <button 
-          className="btn-primary" 
-          onClick={onStartCameras}
-          disabled={systemActive}
-        >
-          <span>▶ Start Cameras</span>
-        </button>
         <button 
           className={recording ? 'btn-danger' : 'btn-secondary'}
           onClick={onToggleRecording}
