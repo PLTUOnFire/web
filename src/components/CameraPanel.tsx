@@ -19,6 +19,7 @@ interface Camera {
   metrics: CameraMetrics
   face: boolean
   selectedDeviceId?: string
+  operatorName?: string
 }
 
 interface CameraPanelProps {
@@ -31,6 +32,7 @@ interface CameraPanelProps {
   onDeviceChange: (deviceId: string) => void
   onStartCamera: (deviceId?: string) => Promise<void>
   onStopCamera?: (camId: string) => Promise<void>
+  onOperatorNameChange?: (camId: string, name: string) => void
   isDeviceInUse?: (deviceId: string) => string | null
   isRecording?: boolean
 }
@@ -45,11 +47,14 @@ function CameraPanel({
   onDeviceChange,
   onStartCamera,
   onStopCamera,
+  onOperatorNameChange,
   isDeviceInUse,
   isRecording
 }: CameraPanelProps) {
   const camNumber = String(index + 1).padStart(2, '0')
   const [isStarting, setIsStarting] = useState(false)
+  const [isEditingOperator, setIsEditingOperator] = useState(false)
+  const [tempOperatorName, setTempOperatorName] = useState(camera.operatorName || `Operator-${index + 1}`)
 
   const handleDeviceChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const deviceId = e.target.value
@@ -73,6 +78,18 @@ function CameraPanel({
     if (onStopCamera) {
       await onStopCamera(camId)
     }
+  }
+
+  const handleOperatorNameSubmit = () => {
+    if (tempOperatorName.trim() && onOperatorNameChange) {
+      onOperatorNameChange(camId, tempOperatorName.trim())
+    }
+    setIsEditingOperator(false)
+  }
+
+  const handleOperatorNameCancel = () => {
+    setTempOperatorName(camera.operatorName || `Operator-${index + 1}`)
+    setIsEditingOperator(false)
   }
 
   return (
@@ -104,6 +121,54 @@ function CameraPanel({
             {camera.face ? 'FACE ✓' : 'NO FACE'}
           </span>
         </div>
+      </div>
+
+      {/* Operator Name Section */}
+      <div className="operator-section">
+        <div className="operator-label">👤 Operator:</div>
+        {isEditingOperator ? (
+          <div className="operator-edit-container">
+            <input
+              type="text"
+              value={tempOperatorName}
+              onChange={(e) => setTempOperatorName(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') handleOperatorNameSubmit()
+                if (e.key === 'Escape') handleOperatorNameCancel()
+              }}
+              className="operator-input"
+              placeholder="Enter operator name"
+              autoFocus
+              maxLength={50}
+            />
+            <div className="operator-edit-buttons">
+              <button 
+                onClick={handleOperatorNameSubmit}
+                className="operator-btn save"
+                title="Save (Enter)"
+              >
+                ✓
+              </button>
+              <button 
+                onClick={handleOperatorNameCancel}
+                className="operator-btn cancel"
+                title="Cancel (Esc)"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div 
+            className={`operator-display ${isRecording ? 'locked' : ''}`}
+            onClick={() => !isRecording && setIsEditingOperator(true)}
+            title={isRecording ? 'Locked while recording' : 'Click to edit operator name'}
+          >
+            <span className="operator-name">{camera.operatorName || `Operator-${index + 1}`}</span>
+            {!isRecording && <span className="operator-edit-icon">✏️</span>}
+            {isRecording && <span className="operator-lock-icon">🔒</span>}
+          </div>
+        )}
       </div>
 
       {/* Device Selector */}

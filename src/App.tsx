@@ -50,6 +50,7 @@ function App() {
     availableDevices,
     getAvailableDevices,
     setSelectedDevice,
+    setOperatorName: setCameraOperatorName,
     isDeviceInUse,
     updateCameraMetrics,
     updateCameraFace,
@@ -153,6 +154,12 @@ function App() {
     addLog(`${camId} stopped`, 'info')
   }
 
+  // Handle operator name change for specific camera
+  const handleOperatorNameChange = (camId: string, name: string) => {
+    setCameraOperatorName(camId, name)
+    addLog(`${camId}: Operator name set to "${name}"`, 'info')
+  }
+
   // Start calibration (requires recording to be started first - backend needs CameraSession from /record/start)
   const handleStartCalibration = async () => {
     // Check if at least one camera is active
@@ -242,22 +249,27 @@ function App() {
       
       for (const camId of activeCameras) {
         const stream = streamsRef.current[camId as 'cam1' | 'cam2' | 'cam3']
+        const camera = cameras[camId as 'cam1' | 'cam2' | 'cam3']
+        
         if (!stream) {
           addLog(`${camId}: No stream available`, 'warning')
           continue
         }
         
+        // Use operator name from the specific camera
+        const operatorNameForCamera = camera.operatorName || `Operator-${activeCameras.indexOf(camId) + 1}`
+        
         const result = await startRecording(
           camId,
           stream,
-          operatorName,
+          operatorNameForCamera,
           60
         )
         
         if (result.success && result.sessionId) {
           successCount++
           newSessionIds[camId as 'cam1' | 'cam2' | 'cam3'] = result.sessionId
-          addLog(`${camId}: Session ID captured: ${result.sessionId.slice(0, 12)}...`, 'info')
+          addLog(`${camId} (${operatorNameForCamera}): Session ID captured: ${result.sessionId.slice(0, 12)}...`, 'info')
         }
       }
       
@@ -362,6 +374,7 @@ function App() {
           onDeviceChange={handleDeviceChange}
           onStartCamera={handleStartCamera}
           onStopCamera={handleStopCamera}
+          onOperatorNameChange={handleOperatorNameChange}
           isDeviceInUse={isDeviceInUse}
           isRecording={isRecording}
         />

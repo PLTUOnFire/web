@@ -38,6 +38,150 @@
   text-transform: uppercase;
 }
 
+/* ============================================================================
+   OPERATOR NAME SECTION
+   ============================================================================ */
+.operator-section {
+  padding: 12px 20px;
+  background: rgba(0, 13, 26, 0.6);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.operator-label {
+  font-size: 0.85rem;
+  color: var(--text-mid);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.operator-display {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(0, 255, 136, 0.05);
+  border: 1px solid rgba(0, 255, 136, 0.2);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.operator-display:not(.locked):hover {
+  background: rgba(0, 255, 136, 0.1);
+  border-color: var(--accent-primary);
+  transform: translateX(2px);
+}
+
+.operator-display.locked {
+  cursor: not-allowed;
+  background: rgba(100, 100, 100, 0.1);
+  border-color: rgba(100, 100, 100, 0.3);
+}
+
+.operator-name {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+  letter-spacing: 0.05em;
+}
+
+.operator-display.locked .operator-name {
+  color: var(--text-mid);
+}
+
+.operator-edit-icon {
+  font-size: 0.85rem;
+  opacity: 0.6;
+  transition: opacity 0.3s ease;
+}
+
+.operator-display:not(.locked):hover .operator-edit-icon {
+  opacity: 1;
+}
+
+.operator-lock-icon {
+  font-size: 0.85rem;
+  opacity: 0.5;
+}
+
+.operator-edit-container {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.operator-input {
+  flex: 1;
+  padding: 8px 12px;
+  background: rgba(0, 13, 26, 0.9);
+  border: 2px solid var(--accent-primary);
+  border-radius: 6px;
+  color: var(--text-bright);
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  outline: none;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+}
+
+.operator-input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+}
+
+.operator-edit-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.operator-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  font-weight: 700;
+}
+
+.operator-btn.save {
+  background: linear-gradient(135deg, var(--accent-primary), #00cc66);
+  color: var(--bg-deep);
+}
+
+.operator-btn.save:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(0, 255, 136, 0.5);
+}
+
+.operator-btn.cancel {
+  background: rgba(255, 51, 102, 0.2);
+  border: 1px solid rgba(255, 51, 102, 0.5);
+  color: var(--accent-danger);
+}
+
+.operator-btn.cancel:hover {
+  background: rgba(255, 51, 102, 0.3);
+  border-color: var(--accent-danger);
+  transform: translateY(-2px);
+}
+
+/* ============================================================================
+   DEVICE SELECTOR
+   ============================================================================ */
 .device-selector {
   padding: 12px 20px;
   background: rgba(10, 13, 18, 0.8);
@@ -134,6 +278,8 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+.badge {
   padding: 4px 10px;
   border-radius: 4px;
   font-weight: 600;
@@ -230,5 +376,16 @@
 
   .metrics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .operator-section {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .operator-display,
+  .operator-edit-container {
+    width: 100%;
   }
 }

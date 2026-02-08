@@ -16,6 +16,7 @@ interface Camera {
   }
   face: boolean
   selectedDeviceId?: string
+  operatorName?: string
 }
 
 interface CameraGridProps {
@@ -26,6 +27,7 @@ interface CameraGridProps {
   onDeviceChange: (camId: string, deviceId: string) => void
   onStartCamera: (camId: string, deviceId?: string) => Promise<void>
   onStopCamera?: (camId: string) => Promise<void>
+  onOperatorNameChange?: (camId: string, name: string) => void
   isDeviceInUse?: (deviceId: string) => string | null
   isRecording?: boolean
 }
@@ -38,6 +40,7 @@ function CameraGrid({
   onDeviceChange,
   onStartCamera,
   onStopCamera,
+  onOperatorNameChange,
   isDeviceInUse,
   isRecording
 }: CameraGridProps) {
@@ -55,6 +58,7 @@ function CameraGrid({
           onDeviceChange={(deviceId) => onDeviceChange(camId, deviceId)}
           onStartCamera={(deviceId) => onStartCamera(camId, deviceId)}
           onStopCamera={onStopCamera}
+          onOperatorNameChange={onOperatorNameChange}
           isDeviceInUse={isDeviceInUse}
           isRecording={isRecording}
         />
